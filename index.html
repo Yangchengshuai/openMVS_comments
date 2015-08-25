@@ -1,0 +1,93 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="chrome=1">
+    <title>OpenMVS by cdcseacave</title>
+    <link rel="stylesheet" href="stylesheets/styles.css">
+    <link rel="stylesheet" href="stylesheets/github-dark.css">
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.7.1/jquery.min.js"></script>
+    <script src="javascripts/main.js"></script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+
+  </head>
+  <body>
+
+      <header>
+        <h1>OpenMVS</h1>
+        <p>open Multi-View Stereo reconstruction library</p>
+      </header>
+
+      <div id="banner">
+        <span id="logo"></span>
+
+        <a href="https://github.com/cdcseacave/openMVS" class="button fork"><strong>View On GitHub</strong></a>
+        <div class="downloads">
+          <span>Downloads:</span>
+          <ul>
+            <li><a href="https://github.com/cdcseacave/openMVS/zipball/master" class="button">ZIP</a></li>
+            <li><a href="https://github.com/cdcseacave/openMVS/tarball/master" class="button">TAR</a></li>
+          </ul>
+        </div>
+      </div><!-- end banner -->
+
+    <div class="wrapper">
+      <nav>
+        <ul></ul>
+      </nav>
+      <section>
+        <h2>
+<a id="introduction" class="anchor" href="#introduction" aria-hidden="true"><span class="octicon octicon-link"></span></a>Introduction</h2>
+
+<p><a href="http://cdcseacave.github.io/openMVS">OpenMVS (Multi-View Stereo)</a> is a library for computer-vision scientists and especially targeted to the Multi-View Stereo reconstruction community. While there are mature and complete open-source projects targeting Structure-from-Motion pipelines (like <a href="https://github.com/openMVG/openMVG">OpenMVG</a>) which recover camera poses and a sparse 3D point-cloud from an input set of images, there are none addressing the last part of the photogrammetry chain-flow. <em>OpenMVS</em> aims at filling that gap by providing a complete set of algorithms to recover the full surface of the scene to be reconstructed. The input is a set of camera poses plus the sparse point-cloud and the output is a textured mesh. The main topics covered by this project are:</p>
+
+<ul>
+<li>
+<strong>dense point-cloud reconstruction</strong> for obtaining a complete and accurate as possible point-cloud</li>
+<li>
+<strong>mesh reconstruction</strong> for estimating a mesh surface that explains the best the input point-cloud</li>
+<li>
+<strong>mesh refinement</strong> for recovering all fine details</li>
+<li>
+<strong>mesh texturing</strong> for computing a sharp and accurate texture to color the mesh</li>
+</ul>
+
+<p>See the complete <a href="https://github.com/cdcseacave/openMVS/wiki">documentation</a> on wiki.</p>
+
+<h2>
+<a id="build" class="anchor" href="#build" aria-hidden="true"><span class="octicon octicon-link"></span></a>Build</h2>
+
+<p>See the <a href="https://github.com/cdcseacave/openMVS/wiki/Building">building</a> wiki page.</p>
+
+<h2>
+<a id="license" class="anchor" href="#license" aria-hidden="true"><span class="octicon octicon-link"></span></a>License</h2>
+
+<p>See the <a href="https://github.com/cdcseacave/openMVS/blob/master/COPYRIGHT.md">AGPL</a> copyright file.</p>
+
+<h2>
+<a id="contact" class="anchor" href="#contact" aria-hidden="true"><span class="octicon octicon-link"></span></a>Contact</h2>
+
+<p>openmvs[AT]googlegroups.com</p>
+      </section>
+      <footer>
+        <p>Project maintained by <a href="https://github.com/cdcseacave">cdcseacave</a></p>
+        <p><small>Hosted on GitHub Pages &mdash; Theme by <a href="https://twitter.com/michigangraham">mattgraham</a></small></p>
+      </footer>
+    </div>
+    <!--[if !IE]><script>fixScale(document);</script><![endif]-->
+              <script type="text/javascript">
+            var gaJsHost = (("https:" == document.location.protocol) ? "https://ssl." : "http://www.");
+            document.write(unescape("%3Cscript src='" + gaJsHost + "google-analytics.com/ga.js' type='text/javascript'%3E%3C/script%3E"));
+          </script>
+          <script type="text/javascript">
+            try {
+              var pageTracker = _gat._getTracker("UA-66714336-1");
+            pageTracker._trackPageview();
+            } catch(err) {}
+          </script>
+
+  </body>
+</html>
