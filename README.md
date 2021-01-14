@@ -2,9 +2,13 @@
 OpenMVS 注释版
 
 建议：
+
 1、在Ubuntu16.04版本下安装，依赖库在这个版本下更适合。其他版本自己可以尝试。
+
 2、第三步main_path='pwd' 这个其实是设置的是vcglib所在的路径，可以在VCGLib安装之后再指定， 例如我的vcg在/home/code/mvs下，main_path='/home/code/mvs'
+
 3、boost 安装过程中如果有问题可以尝试不同版本，比如升级到1.6.3 。
+
 4、install时候如果opencv报一些未定义错误，需要自己换更高级别的版本，比如opencv3或4从源码安装。
 
 ---
