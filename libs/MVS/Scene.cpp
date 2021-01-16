@@ -532,12 +532,17 @@ bool Scene::SelectNeighborViews(uint32_t ID, IndexArr& points, unsigned nMinView
 		float avgAngle;
 		uint32_t points;
 	};
+	// 该变量size是所有帧的数量，用来存储所有帧与当前帧的共视信息以便筛选neighborViews
 	CLISTDEF0(Score) scores(images.GetSize());
 	scores.Memset(0);
 	if (nMinPointViews > nCalibratedImages)
 		nMinPointViews = nCalibratedImages;
 	unsigned nPoints = 0;
 	imageData.avgDepth = 0;
+
+	// 查找当前id能看到的所有3D点存储到points中并计算这些点平均深度及与当前id共视的所有帧view并计算3D点与当前帧
+	// 和共视帧的相机原点坐标连线夹角angle,score=min((angle/foptiangle)^1.5,1)*wScale，该score意义是夹角越接
+	// 近我们设置的阈值foptiangle分数越高，一般阈值10°。目的是避免立体匹配时两帧图像夹角太小（基线小）
 	FOREACH(idx, pointcloud.points) {
 		const PointCloud::ViewArr& views = pointcloud.pointViews[idx];
 		ASSERT(views.IsSorted());
@@ -579,11 +584,14 @@ bool Scene::SelectNeighborViews(uint32_t ID, IndexArr& points, unsigned nMinView
 	ASSERT(nPoints > 3);
 
 	// select best neighborViews
+	// 计算reference 与上述得到的每一个邻域帧的共视的3d点在reference图像上投影面积,进而得到
+	// 最终的每个候选邻域帧的score即上面由角度计算的分数与面积乘积。然后根据分数排序。
 	Point2fArr projs(0, points.GetSize());
 	FOREACH(IDB, images) {
 		const Image& imageDataB = images[IDB];
 		if (!imageDataB.IsValid())
 			continue;
+		
 		const Score& score = scores[IDB];
 		if (score.points < 3)
 			continue;

@@ -146,6 +146,7 @@ DepthMapsData::~DepthMapsData()
 // For each vertex, a list of possible labels is created using the list of neighbor views and scored accordingly (the score is normalized by the average score).
 // For each existing edge, the score is defined such that pairing the same two views for any two vertices is discouraged (a constant high penalty is applied for such edges).
 // This primal-dual defined problem, even if NP hard, can be solved by a Belief Propagation like algorithm, obtaining in general a solution close enough to optimality.
+//? MRF graphcut 具体算法还没搞清楚
 bool DepthMapsData::SelectViews(IIndexArr& images, IIndexArr& imagesMap, IIndexArr& neighborsMap)
 {
 	// find all pair of images valid for dense reconstruction

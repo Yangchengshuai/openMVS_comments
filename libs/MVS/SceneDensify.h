@@ -51,7 +51,15 @@ class MVS_API DepthMapsData
 public:
 	DepthMapsData(Scene& _scene);
 	~DepthMapsData();
-
+	/**
+	 * @brief 给每帧图像全局选一个最优的target image用来深度计算。
+	 * 
+	 * @param[in] images 		记录用来计算depth的有效帧id
+	 * @param[in] imagesMap 	记录计算depth的帧在全局中id与depth计算数据结构中新id对应关系
+	 * @param[in] neighborsMap 	记录每帧对应的参考帧
+	 * @return true 
+	 * @return false 
+	 */
 	bool SelectViews(IIndexArr& images, IIndexArr& imagesMap, IIndexArr& neighborsMap);
 	bool SelectViews(DepthData& depthData);
 	bool InitViews(DepthData& depthData, IIndex idxNeighbor, IIndex numNeighbors);
