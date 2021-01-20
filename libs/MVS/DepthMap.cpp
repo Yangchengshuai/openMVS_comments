@@ -259,6 +259,9 @@ unsigned DepthData::DecRef()
 //                         1 2 3
 //  1 2 4 7 5 3 6 8 9 -->  4 5 6
 //                         7 8 9
+//                                  1 2 4 7
+//!!! 之字形 1 2 4 7 5 3 6 8 9 -->  3 5 8
+//                                  6 9
 void DepthEstimator::MapMatrix2ZigzagIdx(const Image8U::Size& size, DepthEstimator::MapRefArr& coords, const BitMatrix& mask, int rawStride)
 {
 	typedef DepthEstimator::MapRef MapRef;
@@ -345,6 +348,7 @@ DepthEstimator::DepthEstimator(
 }
 
 // center a patch of given size on the segment
+//判断像素点x可以组建一个patch。
 bool DepthEstimator::PreparePixelPatch(const ImageRef& x)
 {
 	x0 = x;
@@ -352,16 +356,25 @@ bool DepthEstimator::PreparePixelPatch(const ImageRef& x)
 	       image0.image.isInside(ImageRef(x.x+nSizeHalfWindow, x.y+nSizeHalfWindow));
 }
 // fetch the patch pixel values in the main image
+//
 bool DepthEstimator::FillPixelPatch()
 {
 	#if DENSE_NCC != DENSE_NCC_WEIGHTED
+	//image0sum 是积分图，GetImage0Sum在积分图上都到x0patch的像素对应灰度值之和，取平均。
 	const float mean(GetImage0Sum(x0)/nTexels);
 	normSq0 = 0;
 	float* pTexel0 = texels0.data();
+	//为ncc准备数据：normSq0=Σ(q-mean(q))^2  texels0=q-mean(q)
 	for (int i=-nSizeHalfWindow; i<=nSizeHalfWindow; i+=nSizeStep)
 		for (int j=-nSizeHalfWindow; j<=nSizeHalfWindow; j+=nSizeStep)
 			normSq0 += SQUARE(*pTexel0++ = image0.image(x0.y+i, x0.x+j)-mean);
 	#else
+	//参考 http://www.bmva.org/bmvc/2011/proceedings/paper14/paper14.pdf 2.1-公式3
+	// weight:RGB space weight:patch中像素与中心像素的颜色值的相似度（0-1）wc=(image0(x0+x)-colCenter)*sigmaColor
+	//spatial space weight： patch中像素与中心像素的距离（0-1）wd=float(SQUARE(x.x) + SQUARE(x.y)) * sigmaSpatial
+	//weight=exp(wc+wd)
+	//sumWeights=Σweight
+	//normSq0_temp=Σ（weight*image0.image(x0.y+i, x0.x+j)）
 	Weight& w = weightMap0[x0.y*image0.image.width()+x0.x];
 	if (w.normSq0 == 0) {
 		w.sumWeights = 0;
@@ -379,6 +392,8 @@ bool DepthEstimator::FillPixelPatch()
 		ASSERT(n == nTexels);
 		const float tm(w.normSq0/w.sumWeights);
 		w.normSq0 = 0;
+		//w.normSq0=Σweight*（image0.image(x0.y+i, x0.x+j)-normSq0_temp/sumWeights)^2
+		//tempWeight=Σweight*（image0.image(x0.y+i, x0.x+j)-normSq0_temp/sumWeights)
 		n = 0;
 		do {
 			Weight::Pixel& pw = w.weights[n];
@@ -395,9 +410,11 @@ bool DepthEstimator::FillPixelPatch()
 }
 
 // compute pixel's NCC score in the given target image
+//参考两篇论文的代价计算公式：将patch通过H变换转到target view上计算对应像素的
 float DepthEstimator::ScorePixelImage(const ViewData& image1, Depth depth, const Normal& normal)
 {
 	// center a patch of given size on the segment and fetch the pixel values in the target image
+	//计算H矩阵参考Accurate Multiple View 3D Reconstruction Using Patch-Based Stereo for Large-Scale Scenes 公式5
 	Matrix3x3f H(ComputeHomographyMatrix(image1, depth, normal));
 	Point3f X;
 	ProjectVertex_3x3_2_3(H.val, Point2f(float(x0.x-nSizeHalfWindow),float(x0.y-nSizeHalfWindow)).ptr(), X.ptr());
@@ -454,6 +471,7 @@ float DepthEstimator::ScorePixelImage(const ViewData& image1, Depth depth, const
 	float score(1.f-ncc);
 	#if DENSE_SMOOTHNESS != DENSE_SMOOTHNESS_NA
 	// encourage smoothness
+	//!!!增加平滑因子
 	for (const NeighborEstimate& neighbor: neighborsClose) {
 		#if DENSE_SMOOTHNESS == DENSE_SMOOTHNESS_PLANE
 		const float factorDepth(DENSE_EXP(SQUARE(plane.Distance(neighbor.X)/depth) * smoothSigmaDepth));
@@ -469,6 +487,7 @@ float DepthEstimator::ScorePixelImage(const ViewData& image1, Depth depth, const
 }
 
 // compute pixel's NCC score
+//计算像素点的NCC值 
 float DepthEstimator::ScorePixel(Depth depth, const Normal& normal)
 {
 	ASSERT(depth > 0 && normal.dot(Cast<float>(static_cast<const Point3&>(X0))) <= 0);
@@ -478,10 +497,12 @@ float DepthEstimator::ScorePixel(Depth depth, const Normal& normal)
 		scores[idxView] = ScorePixelImage(images[idxView], depth, normal);
 	#if DENSE_AGGNCC == DENSE_AGGNCC_NTH
 	// set score as the nth element
+	//直接从邻域view的score中返回第N小的score
 	return scores.GetNth(idxScore);
 	#elif DENSE_AGGNCC == DENSE_AGGNCC_MEAN
 	// set score as the average similarity
 	#if 1
+	//平均值
 	return scores.mean();
 	#else
 	const float* pscore(scores.data());
@@ -502,6 +523,7 @@ float DepthEstimator::ScorePixel(Depth depth, const Normal& normal)
 	#if 0
 	return std::accumulate(scores.cbegin(), &scores.GetNth(idxScore), 0.f) / idxScore;
 	#elif 1
+	//
 	const float* pescore(&scores.GetNth(idxScore));
 	const float* pscore(scores.cbegin());
 	int n(1); float score(*pscore);
@@ -536,13 +558,16 @@ void DepthEstimator::ProcessPixel(IDX idx)
 {
 	// compute pixel coordinates from pixel index and its neighbors
 	ASSERT(dir == LT2RB || dir == RB2LT);
-	if (!PreparePixelPatch(dir == LT2RB ? coords[idx] : coords[coords.GetSize()-1-idx]) || !FillPixelPatch())
+	//!!! FillPixelPatch不应该再调用，对效果不会有影响但是重复计算耗时。该函数是准备reference image的每个像素patch的,只需要计算一次。在ScoreDepthMapTmp中做初始化已经调用过。
+	//if (!PreparePixelPatch(dir == LT2RB ? coords[idx] : coords[coords.GetSize()-1-idx]) || !FillPixelPatch())
+	if (!PreparePixelPatch(dir == LT2RB ? coords[idx] : coords[coords.GetSize()-1-idx]))
 		return;
 	// find neighbors
 	neighbors.Empty();
 	#if DENSE_SMOOTHNESS != DENSE_SMOOTHNESS_NA
 	neighborsClose.Empty();
 	#endif
+	//从左上到右下遍历
 	if (dir == LT2RB) {
 		// direction from left-top to right-bottom corner
 		if (x0.x > nSizeHalfWindow) {
@@ -599,7 +624,7 @@ void DepthEstimator::ProcessPixel(IDX idx)
 				});
 		}
 		#endif
-	} else {
+	} else {//从右下到左上遍历
 		ASSERT(dir == RB2LT);
 		// direction from right-bottom to left-top corner
 		if (x0.x < size.width-nSizeHalfWindow) {
@@ -664,6 +689,7 @@ void DepthEstimator::ProcessPixel(IDX idx)
 	ASSERT(depth > 0 && normal.dot(viewDir) <= 0);
 	#if DENSE_REFINE == DENSE_REFINE_ITER
 	// check if any of the neighbor estimates are better then the current estimate
+	//邻域传播
 	#if DENSE_SMOOTHNESS != DENSE_SMOOTHNESS_NA
 	FOREACH(n, neighbors) {
 		const ImageRef& nx = neighbors[n];
@@ -676,6 +702,7 @@ void DepthEstimator::ProcessPixel(IDX idx)
 		#if DENSE_SMOOTHNESS != DENSE_SMOOTHNESS_NA
 		NeighborEstimate& neighbor = neighborsClose[n];
 		#endif
+		//计算x0在邻域patch平面上的depth值
 		neighbor.depth = InterpolatePixel(nx, neighbor.depth, neighbor.normal);
 		CorrectNormal(neighbor.normal);
 		ASSERT(neighbor.depth > 0 && neighbor.normal.dot(viewDir) <= 0);
@@ -691,8 +718,10 @@ void DepthEstimator::ProcessPixel(IDX idx)
 		}
 	}
 	// try random values around the current estimate in order to refine it
+	//随机分配：在当前depth值下上下加随机值来找最优值来进一步优化
 	unsigned idxScaleRange(0);
 	RefineIters:
+	//idxScaleRange越小随机区间越大，如果conf比较低说明当前深度值准确度越低，所以随机区间应该大些才有可能找到更准确的值。
 	if (conf <= thConfSmall)
 		idxScaleRange = 2;
 	else if (conf <= thConfBig)
@@ -717,6 +746,7 @@ void DepthEstimator::ProcessPixel(IDX idx)
 	float scaleRange(scaleRanges[idxScaleRange]);
 	const float depthRange(MaxDepthDifference(depth, OPTDENSE::fRandomDepthRatio));
 	Point2f p;
+	//将单位法向量转成两个方位角，笔记有图推导
 	Normal2Dir(normal, p);
 	Normal nnormal;
 	for (unsigned iter=0; iter<OPTDENSE::nRandomIters; ++iter) {
@@ -764,8 +794,10 @@ void DepthEstimator::ProcessPixel(IDX idx)
 		#endif
 		if (neighbor.normal.dot(viewDir) >= 0)
 			continue;
+		//计算x0在邻域patch平面上的depth值
 		prevEstimate.depth = InterpolatePixel(nx, neighbor.depth, neighbor.normal);
 		prevEstimate.normal = neighbor.normal;
+		//调整法线方向保证法线与视线方向夹角在90内
 		CorrectNormal(prevEstimate.normal);
 		prevCost = nconf;
 	}
@@ -802,6 +834,9 @@ void DepthEstimator::ProcessPixel(IDX idx)
 }
 
 // interpolate given pixel's estimate to the current position
+// 邻域比较的是代价m(p,fpn)与m(p,fp)，fpn是邻域的平面 fp是当前点的平面。如果简单计算就直接把邻域depth和normal拿来计算ScorePixel(ndepth, nnormal)。
+// 但准确计算的话depth应该是p点在fpn平面的depth而非是邻域depth，InterpolatePixel实现的就是这个功能，用邻域的depth和normal计算其平面，然后计算x0在该邻域平面上
+// 的投影即为新的depth。
 Depth DepthEstimator::InterpolatePixel(const ImageRef& nx, Depth depth, const Normal& normal) const
 {
 	ASSERT(depth > 0 && normal.dot(image0.camera.TransformPointI2C(Cast<REAL>(nx))) <= 0);
@@ -844,6 +879,7 @@ Depth DepthEstimator::InterpolatePixel(const ImageRef& nx, Depth depth, const No
 	}
 	#else
 	// compute as the ray - plane intersection
+	// 利用nx=d平面方程计算depth。x=depthnew*X0 
 	{
 		#if 0
 		const Plane plane(Cast<REAL>(normal), image0.camera.TransformPointI2C(Point3(nx, depth)));
@@ -863,6 +899,7 @@ Depth DepthEstimator::InterpolatePixel(const ImageRef& nx, Depth depth, const No
 // compute plane defined by current depth and normal estimate
 void DepthEstimator::InitPlane(Depth depth, const Normal& normal)
 {
+	//平面方程：Nx+d=0
 	#if 0
 	plane.Set(reinterpret_cast<const Vec3f&>(normal), Vec3f(depth*Cast<float>(X0)));
 	#else
@@ -890,11 +927,13 @@ DepthEstimator::PixelEstimate DepthEstimator::PerturbEstimate(const PixelEstimat
 	perturbation *= FHALF_PI;
 	while(true) {
 		// generate random perturbation rotation
+		// 增加旋转扰动，旋转法向量
 		const RMatrixBaseF R(urd(rnd)*perturbation, urd(rnd)*perturbation, urd(rnd)*perturbation);
 		// perturb normal vector
 		ptbEst.normal = R * est.normal;
 		// make sure the perturbed normal is still looking towards the camera,
 		// otherwise try again with a smaller perturbation
+		// 保证法线方向是朝向相机的
 		if (ptbEst.normal.dot(viewDir) < 0.f)
 			break;
 		if (++numTrials == numMaxTrials) {
@@ -927,6 +966,7 @@ typedef kernel_t::Point_3 Point;
 
 // triangulate in-view points, generating a 2D mesh
 // return also the estimated depth boundaries (min and max depth)
+//将3d 点投影到depth上进行三角网格化
 std::pair<float,float> TriangulatePointsDelaunay(const DepthData::ViewData& image, const PointCloud& pointcloud, const IndexArr& points, CGAL::Delaunay& delaunay)
 {
 	ASSERT(sizeof(Point3) == sizeof(X3D));

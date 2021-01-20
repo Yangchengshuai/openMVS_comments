@@ -80,7 +80,7 @@ protected:
 public:
 	Scene& scene;
 
-	DepthDataArr arrDepthData;
+	DepthDataArr arrDepthData;// 存放的是每帧depth（见数据结构DepthData)和对应的Id。
 
 	// used internally to estimate the depth-maps
 	Image8U::Size prevDepthMapSize; // remember the size of the last estimated depth-map
@@ -93,7 +93,7 @@ public:
 struct MVS_API DenseDepthMapData {
 	Scene& scene;
 	IIndexArr images;
-	IIndexArr neighborsMap;
+	IIndexArr neighborsMap;//记录每帧对应的参考帧
 	DepthMapsData depthMaps;
 	volatile Thread::safe_t idxImage;
 	SEACAVE::EventQueue events; // internal events queue (processed by the working threads)
