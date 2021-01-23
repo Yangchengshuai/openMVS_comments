@@ -41,8 +41,9 @@
 // D E F I N E S ///////////////////////////////////////////////////
 
 // similarity method
+// 匹配代价计算两种方式：基于census，基于带权重ncc
 #define SGM_SIMILARITY_WZNCC 1
-#define SGM_SIMILARITY_CENSUS 2
+#define SGM_SIMILARITY_CENSUS 2 
 #define SGM_SIMILARITY SGM_SIMILARITY_WZNCC
 
 
@@ -55,14 +56,18 @@ class Scene;
 namespace STEREO {
 
 // An implementation of the popular Semi-Global Matching (SGM) algorithm.
+//参考文献：SGM：Stereo Processing by Semiglobal Matching and Mutual Information
+//         tSGM:SURE: Photogrammetric surface reconstruction from imagery
+// SGM 算法主要实现两种经典SGM和tSGM,主要区别是代价聚合的视差搜索范围不同，故聚合代价有区别。经典SGM使用的全局视差范围，每个
+// 像素的视差范围都是相同。tSGM 视差搜素范围每个像素的范围都不一样。这样可以大大减少代价聚合的计算量。
 class MVS_API SemiGlobalMatcher
 {
 public:
-	typedef uint8_t  Mask;      // used to mark the valid region to be estimated
-	typedef int16_t  Disparity; // contains the allowable disparity range
-	typedef uint8_t  Cost;      // used to describe a single disparity cost
-	typedef uint16_t AccumCost; // used to accumulate CostType values
-	typedef uint64_t Index; // index pointing to pixel costs/accumulated-costs
+	typedef uint8_t  Mask;      // used to mark the valid region to be estimated 记录视差计算的有效区域
+	typedef int16_t  Disparity; // contains the allowable disparity range 视差图包括每个像素的视差range
+	typedef uint8_t  Cost;      // used to describe a single disparity cost 视差代价
+	typedef uint16_t AccumCost; // used to accumulate CostType values 视差聚合代价
+	typedef uint64_t Index; // index pointing to pixel costs/accumulated-costs 记录每个指向代价体的索引
 
 	enum : Mask      { INVALID = 0, VALID = DECLARE_NO_INDEX(Mask) }; // invalid/valid mask value
 	enum : Disparity { NO_DISP = DECLARE_NO_INDEX(Disparity) }; // invalid disparity value
@@ -78,7 +83,7 @@ public:
 	};
 	struct PixelData {
 		Index idx; // index to pixel costs/accumulated-costs data
-		Range range; // first and last disparity evaluated for this pixel
+		Range range; // first and last disparity evaluated for this pixel 记录视差范围
 	};
 
 	typedef TImage<Mask> MaskMap; // image of accumulated disparity cost

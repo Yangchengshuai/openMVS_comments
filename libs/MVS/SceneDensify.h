@@ -61,15 +61,45 @@ public:
 	 * @return false 
 	 */
 	bool SelectViews(IIndexArr& images, IIndexArr& imagesMap, IIndexArr& neighborsMap);
+	/**
+	 * @brief 给每帧选择邻域views，
+	 * 
+	 * @param[in] depthData 单帧深度计算相关数据
+	 * @return true 
+	 * @return false 
+	 */
 	bool SelectViews(DepthData& depthData);
 	bool InitViews(DepthData& depthData, IIndex idxNeighbor, IIndex numNeighbors);
+	/**
+	 * @brief 深度图初始化，主要是利用特征点进行初始化
+	 * 
+	 * @param[in] depthData 单帧深度计算相关数据
+	 * @return true 
+	 * @return false 
+	 */
 	bool InitDepthMap(DepthData& depthData);
 	bool EstimateDepthMap(IIndex idxImage);
 
 	bool RemoveSmallSegments(DepthData& depthData);
 	bool GapInterpolation(DepthData& depthData);
-
+	/**
+	 * @brief 深度图滤波
+	 * 
+	 * @param[in] depthData 
+	 * @param[in] idxNeighbors 邻域id
+	 * @param[in] bAdjust true是对当前depth根据邻域投影到当前帧深度进行调整
+	 * @return true 
+	 * @return false 
+	 */
 	bool FilterDepthMap(DepthData& depthData, const IIndexArr& idxNeighbors, bool bAdjust=true);
+
+	/**
+	 * @brief depth融合，融合为一个点云
+	 * 
+	 * @param[in] pointcloud 融合的点云
+	 * @param[in] bEstimateColor 是否重建点云的颜色信息
+	 * @param[in] bEstimateNormal 是否重建点云的法线信息
+	 */
 	void FuseDepthMaps(PointCloud& pointcloud, bool bEstimateColor, bool bEstimateNormal);
 
 protected:
@@ -92,15 +122,15 @@ public:
 
 struct MVS_API DenseDepthMapData {
 	Scene& scene;
-	IIndexArr images;
+	IIndexArr images; 
 	IIndexArr neighborsMap;//记录每帧对应的参考帧
 	DepthMapsData depthMaps;
-	volatile Thread::safe_t idxImage;
+	volatile Thread::safe_t idxImage; //当前计算的帧id
 	SEACAVE::EventQueue events; // internal events queue (processed by the working threads)
 	Semaphore sem;
 	CAutoPtr<Util::Progress> progress;
 	int nFusionMode;
-	STEREO::SemiGlobalMatcher sgm;
+	STEREO::SemiGlobalMatcher sgm;// sgm算法
 
 	DenseDepthMapData(Scene& _scene, int _nFusionMode=0);
 	~DenseDepthMapData();

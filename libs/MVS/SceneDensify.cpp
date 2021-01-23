@@ -334,7 +334,7 @@ bool DepthMapsData::InitViews(DepthData& depthData, IIndex idxNeighbor, IIndex n
 		imageTrg.camera = imageTrg.pImageData->camera;
 		// depth计算使用的都是灰度图
 		imageTrg.pImageData->image.toGray(imageTrg.image, cv::COLOR_BGR2GRAY, true);
-		// !!! resize neighbor帧 即将neighbor scale到与reference相同的尺度
+		// !!! resize neighbor帧 即将neighbor scale到与reference相同的尺度参考论文：Multi-View stereo for community photo collections(5.1 rescaling views)
 		if (imageTrg.ScaleImage(imageTrg.image, imageTrg.image, imageTrg.scale))
 			imageTrg.camera = imageTrg.pImageData->GetCamera(scene.platforms, imageTrg.image.size());
 		DEBUG_EXTRA("Reference image %3u paired with image %3u", idxImage, neighbor.idx.ID);
@@ -383,6 +383,7 @@ bool DepthMapsData::InitViews(DepthData& depthData, IIndex idxNeighbor, IIndex n
 
 // roughly estimate depth and normal maps by triangulating the sparse point cloud
 // and interpolating normal and depth for all pixels
+// depth初始化，利用稀疏点投影到depth上，对这些点进行三角网格划分然后在每个三角面上插值得到每个像素的depth和法向量
 bool DepthMapsData::InitDepthMap(DepthData& depthData)
 {
 	TD_TIMER_STARTD();
@@ -409,6 +410,7 @@ bool DepthMapsData::InitDepthMap(DepthData& depthData)
 
 
 // initialize the confidence map (NCC score map) with the score of the current estimates
+// 利用之前初始化的depth计算每个像素的score
 void* STCALL DepthMapsData::ScoreDepthMapTmp(void* arg)
 {
 	DepthEstimator& estimator = *((DepthEstimator*)arg);
@@ -439,6 +441,7 @@ void* STCALL DepthMapsData::ScoreDepthMapTmp(void* arg)
 	return NULL;
 }
 // run propagation and random refinement cycles
+// 对每个像素进行depth的邻域传播和随机优化
 void* STCALL DepthMapsData::EstimateDepthMapTmp(void* arg)
 {
 	DepthEstimator& estimator = *((DepthEstimator*)arg);
@@ -448,6 +451,7 @@ void* STCALL DepthMapsData::EstimateDepthMapTmp(void* arg)
 	return NULL;
 }
 // remove all estimates with too big score and invert confidence map
+// depth优化，主要是剔除score过大的点，
 void* STCALL DepthMapsData::EndDepthMapTmp(void* arg)
 {
 	DepthEstimator& estimator = *((DepthEstimator*)arg);
@@ -515,7 +519,8 @@ void* STCALL DepthMapsData::EndDepthMapTmp(void* arg)
 /**
  * @brief depth计算,采用patchMatch方法 
         原理细节主要是参考论文"Accurate Multiple View 3D Reconstruction Using Patch-Based Stereo for Large-Scale Scenes", S. Shen, 2013
- * 
+ *      代价计算分两种方式一种是上述论文里面的简单的直接使用NCC来作为匹配代价；
+		另一种是带权重的代价参考论文"PatchMatch Stereo - Stereo Matching with Slanted Support Windows"公式3
  * @param[in] idxImage 
  * @return true 
  * @return false 
@@ -536,7 +541,7 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 	const unsigned nMaxThreads(scene.nMaxThreads);
 
 	// initialize the depth-map
-	// Step 1 depth 初始化：先根据当前帧能看到的点云计算投影到depth上得到稀疏depth图，同时根据这些depth值计算最大最小值；
+	// Step 3_2_1 PM:depth 初始化：先根据当前帧能看到的点云计算投影到depth上得到稀疏depth图，同时根据这些depth值计算最大最小值；
 	// 利用CGAL中的三角网格化函数对稀疏点网格划分，然后再将其栅格化投影对应像素对空缺位置的depth进行插值；
 	// 细节见InitDepthMap函数
 
@@ -577,6 +582,7 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 	#if DENSE_NCC == DENSE_NCC_WEIGHTED
 	DepthEstimator::WeightMap weightMap0(size.area()-(size.width+1)*DepthEstimator::nSizeHalfWindow);
 	#else
+	//计算积分图
 	Image64F imageSum0;
 	cv::integral(image.image, imageSum0, CV_64F);
 	#endif
@@ -586,6 +592,7 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 		//                        1 2 4 7
 		// 1 2 4 7 5 3 6 8 9 >    3 5 8
 		//                        6 9
+		// depth坐标索引转换成之字形，方便后续迭代直接使用
 		DepthEstimator::MapMatrix2ZigzagIdx(size, coords, mask, MAXF(64,(int)nMaxThreads*8));
 	}
 
@@ -599,6 +606,7 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 	volatile Thread::safe_t idxPixel;
 
 	// initialize the reference confidence map (NCC score map) with the score of the current estimates
+	// Step 3_2_2 PM:score confidence初始化，预先计算reference帧每个像素的ncc相关计算
 	{
 		// create working threads
 		idxPixel = -1;
@@ -630,6 +638,7 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 	}
 
 	// run propagation and random refinement cycles on the reference data
+	// Step 3_2_3 PM:depth迭代优化： 邻域传播和随机优化
 	for (unsigned iter=0; iter<OPTDENSE::nEstimationIters; ++iter) {
 		// create working threads
 		idxPixel = -1;
@@ -662,6 +671,7 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 	}
 
 	// remove all estimates with too big score and invert confidence map
+	// Step 3_2_3 PM: 滤波，去除score大的点 invert 置信度图0-1 1是最优
 	{
 		// create working threads
 		idxPixel = -1;
@@ -935,11 +945,13 @@ bool DepthMapsData::GapInterpolation(DepthData& depthData)
 
 
 // filter depth-map, one pixel at a time, using confidence based fusion or neighbor pixels
+// 逐像素滤波
 bool DepthMapsData::FilterDepthMap(DepthData& depthDataRef, const IIndexArr& idxNeighbors, bool bAdjust)
 {
 	TD_TIMER_STARTD();
 
 	// count valid neighbor depth-maps
+	// 判断depth的邻域是否足够后续滤波
 	ASSERT(depthDataRef.IsValid() && !depthDataRef.IsEmpty());
 	const IIndex N = idxNeighbors.GetSize();
 	ASSERT(OPTDENSE::nMinViewsFilter > 0 && scene.nCalibratedImages > 1);
@@ -951,11 +963,12 @@ bool DepthMapsData::FilterDepthMap(DepthData& depthDataRef, const IIndexArr& idx
 	}
 
 	// project all neighbor depth-maps to this image
+	// depthDataRef的所有邻域的depth和conf，投影到当前帧。
 	const DepthData::ViewData& imageRef = depthDataRef.images.First();
 	const Image8U::Size sizeRef(depthDataRef.depthMap.size());
 	const Camera& cameraRef = imageRef.camera;
-	DepthMapArr depthMaps(N);
-	ConfidenceMapArr confMaps(N);
+	DepthMapArr depthMaps(N);// N个邻域投影在当前帧的深度图
+	ConfidenceMapArr confMaps(N);// 同上置信度
 	FOREACH(n, depthMaps) {
 		DepthMap& depthMap = depthMaps[n];
 		depthMap.create(sizeRef);
@@ -965,9 +978,9 @@ bool DepthMapsData::FilterDepthMap(DepthData& depthDataRef, const IIndexArr& idx
 			confMap.create(sizeRef);
 			confMap.memset(0);
 		}
-		const IIndex idxView = depthDataRef.neighbors[idxNeighbors[(IIndex)n]].idx.ID;
-		const DepthData& depthData = arrDepthData[idxView];
-		const Camera& camera = depthData.images.First().camera;
+		const IIndex idxView = depthDataRef.neighbors[idxNeighbors[(IIndex)n]].idx.ID;//邻域ID
+		const DepthData& depthData = arrDepthData[idxView];//邻域depth相关数据
+		const Camera& camera = depthData.images.First().camera;//邻域相机内外参数
 		const Image8U::Size size(depthData.depthMap.size());
 		for (int i=0; i<size.height; ++i) {
 			for (int j=0; j<size.width; ++j) {
@@ -976,12 +989,13 @@ bool DepthMapsData::FilterDepthMap(DepthData& depthDataRef, const IIndexArr& idx
 				if (depth == 0)
 					continue;
 				ASSERT(depth > 0);
-				const Point3 X(camera.TransformPointI2W(Point3(x.x,x.y,depth)));
-				const Point3 camX(cameraRef.TransformPointW2C(X));
+				const Point3 X(camera.TransformPointI2W(Point3(x.x,x.y,depth)));//计算邻域在世界坐标系下的xyz坐标
+				const Point3 camX(cameraRef.TransformPointW2C(X));//投影到当前帧ref的相机坐标系下
 				if (camX.z <= 0)
 					continue;
 				#if 0
 				// set depth on the rounded image projection only
+				// 只投影到取整像素
 				const ImageRef xRef(ROUND2INT(cameraRef.TransformPointC2I(camX)));
 				if (!depthMap.isInside(xRef))
 					continue;
@@ -993,7 +1007,8 @@ bool DepthMapsData::FilterDepthMap(DepthData& depthDataRef, const IIndexArr& idx
 					confMap(xRef) = depthData.confMap(x);
 				#else
 				// set depth on the 4 pixels around the image projection
-				const Point2 imgX(cameraRef.TransformPointC2I(camX));
+				// 计算得到的像素坐标一般不一定是整数，所以上下取整取四个相邻像素得到四个投影坐标
+				const Point2 imgX(cameraRef.TransformPointC2I(camX)); // 投影到像素坐标
 				const ImageRef xRefs[4] = {
 					ImageRef(FLOOR2INT(imgX.x), FLOOR2INT(imgX.y)),
 					ImageRef(FLOOR2INT(imgX.x), CEIL2INT(imgX.y)),
@@ -1002,9 +1017,12 @@ bool DepthMapsData::FilterDepthMap(DepthData& depthDataRef, const IIndexArr& idx
 				};
 				for (int p=0; p<4; ++p) {
 					const ImageRef& xRef = xRefs[p];
+					// 判断是否在图像范围内
 					if (!depthMap.isInside(xRef))
 						continue;
 					Depth& depthRef(depthMap(xRef));
+					// 如果当前坐标已经被投影过且深度图比现在投影的深度值小则不再投影。
+					// 只选择靠相机比较近的深度（认为如果深度比当前大的是遮挡部分投影的）
 					if (depthRef != 0 && depthRef < (Depth)camX.z)
 						continue;
 					depthRef = (Depth)camX.z;
@@ -1029,6 +1047,7 @@ bool DepthMapsData::FilterDepthMap(DepthData& depthDataRef, const IIndexArr& idx
 	if (bAdjust) {
 		// average similar depths, and decrease confidence if depths do not agree
 		// (inspired by: "Real-Time Visibility-Based Fusion of Depth Maps", Merrell, 2007)
+		// 深度图调整
 		for (int i=0; i<sizeRef.height; ++i) {
 			for (int j=0; j<sizeRef.width; ++j) {
 				const ImageRef xRef(j,i);
@@ -1100,6 +1119,7 @@ bool DepthMapsData::FilterDepthMap(DepthData& depthDataRef, const IIndexArr& idx
 		}
 	} else {
 		// remove depth if it does not agree with enough neighbors
+		// 如果邻域与当前depth相似有一定的数量则保留否则剔除
 		const float thDepthDiffStrict(OPTDENSE::fDepthDiffThreshold*0.8f);
 		const unsigned nMinGoodViewsProc(75), nMinGoodViewsDeltaProc(65);
 		const unsigned nDeltas(4);
@@ -1192,6 +1212,7 @@ bool DepthMapsData::FilterDepthMap(DepthData& depthDataRef, const IIndexArr& idx
 // fuse all valid depth-maps in the same 3D point cloud;
 // join points very likely to represent the same 3D point and
 // filter out points blocking the view
+// depth融合：参考Accurate Multiple View 3D Reconstruction Using Patch-Based Stereo for Large-Scale Scenes D部分
 void DepthMapsData::FuseDepthMaps(PointCloud& pointcloud, bool bEstimateColor, bool bEstimateNormal)
 {
 	TD_TIMER_STARTD();
@@ -1460,12 +1481,16 @@ bool Scene::DenseReconstruction(int nFusionMode)
 	DenseDepthMapData data(*this, nFusionMode);
 
 	// estimate depth-maps
+	// depth map fusion mode (-2 - fuse disparity-maps, -1 - export disparity-maps only, 0 - depth-maps & fusion, 1 - export depth-maps only)
+	// 深度图计算两种方式：patchMatch nFusionMode=1；SGM/tSGM nFusionMode=-1 通过nFusionMode控制可以通过这个参数设置对
+	// 这两种算法进行效果性能对比
 	if (!ComputeDepthMaps(data))
 		return false;
 	if (ABS(nFusionMode) == 1)
 		return true;
 
 	// fuse all depth-maps
+	// 将所有depth融合为一个带views信息的点云。每个点记录所有能看到的view的ID信息
 	pointcloud.Release();
 	data.depthMaps.FuseDepthMaps(pointcloud, OPTDENSE::nEstimateColors == 2, OPTDENSE::nEstimateNormals == 2);
 	#if TD_VERBOSE != TD_VERBOSE_OFF
@@ -1502,6 +1527,7 @@ bool Scene::DenseReconstruction(int nFusionMode)
 
 // do first half of dense reconstruction: depth map computation
 // results are saved to "data"
+// 深度图计算patch/sgm
 bool Scene::ComputeDepthMaps(DenseDepthMapData& data)
 {
 	{
@@ -1726,7 +1752,8 @@ void Scene::DenseReconstructionEstimate(void* pData)
 				data.events.AddEventFirst(new EVTEstimateDepthMap(evtImage.idxImage));
 			}
 			break; }
-
+		// Step 3_2 depth 计算:用两种算法实现,一种是基于patchMatch计算深度图实现（主要参考Accurate Multiple View 3D Reconstruction Using Patch-Based Stereo for Large-Scale Scenes）
+		// 一种是基于SGM计算视差图实现（参考Accurate and Efficient Stereo Processing by Semi-Global Matching and Mutual Information）		
 		case EVT_ESTIMATEDEPTHMAP: {
 			const EVTEstimateDepthMap& evtImage = *((EVTEstimateDepthMap*)(Event*)evt);
 			// request next image initialization to be performed while computing this depth-map
@@ -1735,9 +1762,11 @@ void Scene::DenseReconstructionEstimate(void* pData)
 			data.sem.Wait();
 			if (data.nFusionMode >= 0) {
 				// extract depth-map using Patch-Match algorithm
+				// patch match算法
 				data.depthMaps.EstimateDepthMap(data.images[evtImage.idxImage]);
 			} else {
 				// extract disparity-maps using SGM algorithm
+				// SGM算法
 				if (data.nFusionMode == -1) {
 					data.sgm.Match(*this, data.images[evtImage.idxImage], OPTDENSE::nNumViews);
 				} else {
@@ -1759,7 +1788,7 @@ void Scene::DenseReconstructionEstimate(void* pData)
 				data.events.AddEventFirst(new EVTSaveDepthMap(evtImage.idxImage));
 			}
 			break; }
-
+		// Step 3_3 depth 优化 移除小的segment 填充gap	
 		case EVT_OPTIMIZEDEPTHMAP: {
 			const EVTOptimizeDepthMap& evtImage = *((EVTOptimizeDepthMap*)(Event*)evt);
 			const IIndex idx = data.images[evtImage.idxImage];
@@ -1785,7 +1814,7 @@ void Scene::DenseReconstructionEstimate(void* pData)
 			// save depth-map
 			data.events.AddEventFirst(new EVTSaveDepthMap(evtImage.idxImage));
 			break; }
-
+		// Step 3_4 depth 保存
 		case EVT_SAVEDEPTHMAP: {
 			const EVTSaveDepthMap& evtImage = *((EVTSaveDepthMap*)(Event*)evt);
 			const IIndex idx = data.images[evtImage.idxImage];
@@ -1827,6 +1856,7 @@ void* DenseReconstructionFilterTmp(void* arg) {
 }
 
 // filter estimated depth-maps
+// 深度图滤波
 void Scene::DenseReconstructionFilter(void* pData)
 {
 	DenseDepthMapData& data = *((DenseDepthMapData*)pData);

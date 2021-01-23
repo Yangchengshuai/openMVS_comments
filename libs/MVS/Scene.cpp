@@ -517,6 +517,7 @@ inline float Footprint(const Camera& camera, const Point3f& X) {
 // and select the best views for reconstructing the dense point-cloud;
 // extract also all 3D points seen by the reference image;
 // (inspired by: "Multi-View Stereo for Community Photo Collections", Goesele, 2007)
+// 邻域帧选择 
 bool Scene::SelectNeighborViews(uint32_t ID, IndexArr& points, unsigned nMinViews, unsigned nMinPointViews, float fOptimAngle)
 {
 	ASSERT(points.IsEmpty());
@@ -621,7 +622,7 @@ bool Scene::SelectNeighborViews(uint32_t ID, IndexArr& points, unsigned nMinView
 		ViewScore& neighbor = neighbors.AddEmpty();
 		neighbor.idx.ID = IDB;
 		neighbor.idx.points = score.points;
-		neighbor.idx.scale = score.avgScale/score.points;
+		neighbor.idx.scale = score.avgScale/score.points;//scale 计算和用途可参考上述论文5.1
 		neighbor.idx.angle = score.avgAngle/score.points;
 		neighbor.idx.area = area;
 		neighbor.score = score.score*area;
