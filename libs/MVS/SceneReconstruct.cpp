@@ -259,9 +259,9 @@ struct vert_info_t {
 
 struct cell_info_t {
 	typedef edge_cap_t Type;
-	Type f[4]; // faces' weight from the cell outwards
-	Type s; // cell's weight towards s-source
-	Type t; // cell's weight towards t-sink
+	Type f[4]; // 四个faces的权重 faces' weight from the cell outwards
+	Type s; // s cell's weight towards s-source
+	Type t; // t cell's weight towards t-sink
 	inline const Type* ptr() const { return f; }
 	inline Type* ptr() { return f; }
 };
@@ -277,8 +277,8 @@ typedef delaunay_t::Edge edge_t;
 
 #ifdef DELAUNAY_WEAKSURF
 struct view_info_t {
-	cell_handle_t cell2Cam;
-	cell_handle_t cell2End;
+	cell_handle_t cell2Cam; // 相机原点在的cell
+	cell_handle_t cell2End; //终点end在的cell
 };
 vert_info_t::~vert_info_t() {
 	delete[] viewsInfo;
@@ -293,8 +293,8 @@ void vert_info_t::AllocateInfo() {
 #endif
 
 struct camera_cell_t {
-	cell_handle_t cell; // cell containing the camera
-	std::vector<facet_t> facets; // all facets on the convex-hull in view of the camera (ordered by importance)
+	cell_handle_t cell; // 该相机原点所在的cell. cell containing the camera
+	std::vector<facet_t> facets; // 相机在凸包外：该相机视锥内看到的所有faces。相机在凸包内：则是cell的四个面。all facets on the convex-hull in view of the camera (ordered by importance)
 };
 
 struct adjacent_vertex_back_inserter_t {
@@ -322,6 +322,7 @@ inline point_t MVS2CGAL(const TPoint3<TYPE>& p) {
 }
 
 // Given a facet, compute the plane containing it
+// 平面方程计算
 inline Plane getFacetPlane(const facet_t& facet)
 {
 	const point_t& v0(facet.first->vertex((facet.second+1)%4)->point());
@@ -337,6 +338,7 @@ inline Plane getFacetPlane(const facet_t& facet)
 #pragma GCC push_options
 #pragma GCC target ("no-fma")
 #endif
+// 判断p与abc是否共面或者在abc三角面的相对方向
 static inline int orientation(const point_t& a, const point_t& b, const point_t& c, const point_t& p)
 {
 	#if 0
@@ -383,11 +385,16 @@ inline bool checkPointInside(const point_t& a, const point_t& b, const point_t& 
 // Given a cell and a camera inside it, if the cell is infinite,
 // find all facets on the convex-hull and inside the camera frustum,
 // else return all four cell's facets
+// 寻找所有与该相机相关的facet
+// camCell.cell是infinite（在凸包外面），则需找到image视锥中包含的所有facet
+// 如果不是（在凸包内部），只需找到cell的四个facet
 template <int FacetOrientation>
 void fetchCellFacets(const delaunay_t& Tr, const std::vector<facet_t>& hullFacets, const cell_handle_t& cell, const Image& imageData, std::vector<facet_t>& facets)
 {
+	// 如果不是（在凸包内部），只需找到cell的四个facet
 	if (!Tr.is_infinite(cell)) {
 		// store all 4 facets of the cell
+		// 存储cell的四个面
 		for (int i=0; i<4; ++i) {
 			const facet_t f(cell, i);
 			ASSERT(!Tr.is_infinite(f));
@@ -396,11 +403,14 @@ void fetchCellFacets(const delaunay_t& Tr, const std::vector<facet_t>& hullFacet
 		return;
 	}
 	// find all facets on the convex-hull in camera's view
+	// 找到image视锥中包含的所有facet
 	// create the 4 frustum planes
+	// 四个视锥面的构建
 	ASSERT(facets.empty());
 	typedef TFrustum<REAL,4> Frustum;
 	Frustum frustum(imageData.camera.P, imageData.width, imageData.height, 0, 1);
 	// loop over all cells
+	// 查询所有cell 找到视锥内的faces
 	const point_t ptOrigin(MVS2CGAL(imageData.camera.C));
 	for (const facet_t& face: hullFacets) {
 		// add face if visible
@@ -435,6 +445,7 @@ struct intersection_t {
 // Check if a segment (p, q) is coplanar with edges of a triangle (a, b, c):
 //  coplanar [in,out] : pointer to the 3 int array of indices of the edges coplanar with pq
 // return number of entries in coplanar
+// 查找pq与abc的三个edge中哪个edge/面/顶点相交
 inline int checkEdges(const point_t& a, const point_t& b, const point_t& c, const point_t& p, const point_t& q, int coplanar[3])
 {
 	int nCoplanar(0);
@@ -458,6 +469,7 @@ inline int checkEdges(const point_t& a, const point_t& b, const point_t& c, cons
 //  coplanar [out] : pointer to the 3 int array of indices of the edges coplanar with (s)
 // return -1 if there is no intersection or
 // the number of edges coplanar with the segment (0 = intersection inside the triangle)
+// 计算线segment面facet相交
 int intersect(const triangle_t& t, const segment_t& s, int coplanar[3])
 {
 	const point_t& a = t.vertex(0);
@@ -466,51 +478,59 @@ int intersect(const triangle_t& t, const segment_t& s, int coplanar[3])
 	const point_t& p = s.source();
 	const point_t& q = s.target();
 
+	// 计算P相对abc的平面所在方位：可以用右手定则大拇指表示的是p来感受，positive：顺时针握住abc大拇指指向p(abc面的左边)。 NEGATIVE与positive
+	// 相反，COPLANAR：在平面上
 	switch (orientation(a,b,c,p)) {
-	case CGAL::POSITIVE:
+	case CGAL::POSITIVE: // 起点p在面abc左边
 		switch (orientation(a,b,c,q)) {
-		case CGAL::POSITIVE:
+		case CGAL::POSITIVE: // 终点q在面abc左边 故线端pq不可能与面abc相交
 			// the segment lies in the positive open halfspaces defined by the
 			// triangle's supporting plane
 			return -1;
 		case CGAL::COPLANAR:
 			// q belongs to the triangle's supporting plane
 			// p sees the triangle in counterclockwise order
+			// q在abc面上则肯定相交，checkEdges判断交在哪个边上（1）或者面上（0）或者顶点（2），如果不相交与某个边则仍然返回-1
 			return checkEdges(a,b,c,p,q,coplanar);
-		case CGAL::NEGATIVE:
+		case CGAL::NEGATIVE:// 终点q在面abc右边 故线端pq肯定与面abc相交
 			// p sees the triangle in counterclockwise order
 			return checkEdges(a,b,c,p,q,coplanar);
 		default:
 			break;
 		}
-	case CGAL::NEGATIVE:
+	case CGAL::NEGATIVE:// 起点p在面abc右边
 		switch (orientation(a,b,c,q)) {
-		case CGAL::POSITIVE:
+		case CGAL::POSITIVE: // 终点q在面abc左边 故线端pq可能与面abc相交
 			// q sees the triangle in counterclockwise order
+			// q在abc面上则肯定相交，checkEdges判断交在哪个边上（1）或者面上（0）或者顶点（2），如果不相交与某个边则仍然返回-1
 			return checkEdges(a,b,c,q,p,coplanar);
 		case CGAL::COPLANAR:
 			// q belongs to the triangle's supporting plane
 			// p sees the triangle in clockwise order
+			// 同上
 			return checkEdges(a,b,c,q,p,coplanar);
-		case CGAL::NEGATIVE:
+		case CGAL::NEGATIVE: // 终点q在面abc右边 故线端pq不可能与面abc相交
 			// the segment lies in the negative open halfspaces defined by the
 			// triangle's supporting plane
 			return -1;
 		default:
 			break;
 		}
-	case CGAL::COPLANAR: // p belongs to the triangle's supporting plane
+	case CGAL::COPLANAR: // 起点p在面abc面上// p belongs to the triangle's supporting plane
 		switch (orientation(a,b,c,q)) {
 		case CGAL::POSITIVE:
 			// q sees the triangle in counterclockwise order
+			// 同上
 			return checkEdges(a,b,c,q,p,coplanar);
 		case CGAL::COPLANAR:
 			// the segment is coplanar with the triangle's supporting plane
 			// as we know that it is inside the tetrahedron it intersects the face
 			//coplanar[0] = coplanar[1] = coplanar[2] = 3;
+			// 线段在abc面上
 			return 3;
 		case CGAL::NEGATIVE:
 			// q sees the triangle in clockwise order
+			// 同上
 			return checkEdges(a,b,c,p,q,coplanar);
 		default:
 			break;
@@ -525,6 +545,17 @@ int intersect(const triangle_t& t, const segment_t& s, int coplanar[3])
 //  out_facets [out] : vector of facets to check at next step (can be in_facets)
 //  out_inter [out] : kind of intersection
 // return false if no intersection found and the end of the segment was not reached
+/**
+ * @brief 寻找被seg穿过的faceet,并返回下一个待确认的facet
+ * 
+ * @param[in] Tr         所有点划分的四面体凸包
+ * @param[in] seg        分割总线段的起始点
+ * @param[in] in_facets  待确认是否被分割的facet向量
+ * @param[in] out_facets 下一步待确认是否相交的facets
+ * @param[in] inter      当前相交的信息：类型，距离和面
+ * @return true 
+ * @return false 
+ */
 bool intersect(const delaunay_t& Tr, const segment_t& seg, const std::vector<facet_t>& in_facets, std::vector<facet_t>& out_facets, intersection_t& inter)
 {
 	ASSERT(!in_facets.empty());
@@ -536,18 +567,21 @@ bool intersect(const delaunay_t& Tr, const segment_t& seg, const std::vector<fac
 		const int nb_coplanar(intersect(Tr.triangle(in_facet), seg, coplanar));
 		if (nb_coplanar >= 0) {
 			// skip this cell if the intersection is not in the desired direction
+			// 计算in_facet所在的平面到点的距离，如果比上个大则跳过。期望的方向是所穿过的facet距离点的越来越近
 			const REAL interDist(inter.ray.IntersectsDist(getFacetPlane(in_facet)));
 			if ((interDist > prevDist) != inter.bigger)
 				continue;
 			// vertices of facet i: j = 4 * i, vertices = facet_vertex_order[j,j+1,j+2] negative orientation
+			// 每个facet有三个顶点，顶点顺序是逆时针方向。
 			inter.facet = in_facet;
 			inter.dist = interDist;
 			switch (nb_coplanar) {
-			case 0: {
+			case 0: {// 相交于面上
 				// face intersection
 				inter.type = intersection_t::FACET;
 				// now find next facets to be checked as
 				// the three faces in the neighbor cell different than the origin face
+				// 在邻域cell中不同于相交的这个face的其它三个face放入out_facets参与下一次求相交计算
 				out_facets.clear();
 				const cell_handle_t nc(inter.facet.first->neighbor(inter.facet.second));
 				ASSERT(!Tr.is_infinite(nc));
@@ -555,15 +589,17 @@ bool intersect(const delaunay_t& Tr, const segment_t& seg, const std::vector<fac
 					if (nc->neighbor(i) != inter.facet.first)
 						out_facets.push_back(facet_t(nc, i));
 				return true; }
-			case 1: {
+			case 1: { //相交于边上
 				// coplanar with 1 edge = intersect edge
 				const int j(4 * inter.facet.second);
 				const int i1(j + coplanar[0]);
+				// 记录相交的edge信息
 				inter.type = intersection_t::EDGE;
 				inter.v1 = inter.facet.first->vertex(facet_vertex_order[i1+0]);
 				inter.v2 = inter.facet.first->vertex(facet_vertex_order[i1+1]);
 				// now find next facets to be checked as
 				// the two faces in this cell opposing this edge
+				// 查找下一个被check的面，在当前cell中于该edge相对的两个面
 				out_facets.clear();
 				const edge_t out_edge(inter.facet.first, facet_vertex_order[i1+0], facet_vertex_order[i1+1]);
 				const typename delaunay_t::Cell_circulator efc(Tr.incident_cells(out_edge));
@@ -579,9 +615,10 @@ bool intersect(const delaunay_t& Tr, const segment_t& seg, const std::vector<fac
 						out_facets.push_back(f2);
 				} while (++ifc != efc);
 				return true; }
-			case 2: {
+			case 2: { // 相交于两个边即顶点上
 				// coplanar with 2 edges = hit a vertex
 				// find vertex index
+				// 找到相交点的索引
 				const int j(4 * inter.facet.second);
 				const int i1(j + coplanar[0]);
 				const int i2(j + coplanar[1]);
@@ -604,6 +641,7 @@ bool intersect(const delaunay_t& Tr, const segment_t& seg, const std::vector<fac
 				}
 				// now find next facets to be checked as
 				// the faces in the cells around opposing this common vertex
+				// 下一个待check 的面是当前cell中与顶点相对的面
 				out_facets.clear();
 				struct cell_back_inserter_t {
 					const delaunay_t& Tr;
@@ -637,6 +675,7 @@ bool intersect(const delaunay_t& Tr, const segment_t& seg, const std::vector<fac
 
 // same as above, but simplified only to find face intersection (otherwise terminate);
 // terminate if cell containing the segment endpoint is found or if an infinite cell is encountered
+// 同上，只寻找相交在面上的facet如果是相交到顶点和edge则不考虑，如果找到包含段端点的cell，或者遇到无限单元，则终止
 bool intersectFace(const delaunay_t& Tr, const segment_t& seg, const std::vector<facet_t>& in_facets, std::vector<facet_t>& out_facets, intersection_t& inter)
 {
 	int coplanar[3];
@@ -662,6 +701,7 @@ bool intersectFace(const delaunay_t& Tr, const segment_t& seg, const std::vector
 	return false;
 }
 // same as above, but starts from a known vertex and incident cell
+// 与上述相同
 inline bool intersectFace(const delaunay_t& Tr, const segment_t& seg, const vertex_handle_t& v, const cell_handle_t& cell, std::vector<facet_t>& out_facets, intersection_t& inter)
 {
 	if (cell == cell_handle_t())
@@ -678,10 +718,12 @@ inline bool intersectFace(const delaunay_t& Tr, const segment_t& seg, const vert
 
 
 // Given a cell, compute the free-space support for it
+// 计算每个cell 的ft
 edge_cap_t freeSpaceSupport(const delaunay_t& Tr, const std::vector<cell_info_t>& infoCells, const cell_handle_t& cell)
 {
 	// sum up all 4 incoming weights
 	// (corresponding to the 4 facets of the neighbor cells)
+	// 把四个面的邻域面的weight加和
 	edge_cap_t wf(0);
 	for (int i=0; i<4; ++i) {
 		const facet_t& mfacet(Tr.mirror_facet(facet_t(cell, i)));
@@ -765,39 +807,63 @@ float computePlaneSphereAngle(const delaunay_t& Tr, const facet_t& facet)
 // Next, the score is computed for all the edges of the directed graph composed of points as vertices.
 // Finally, graph-cut algorithm is used to split the tetrahedrons in inside and outside,
 // and the surface is such extracted.
+/**
+ * @brief mesh重建：首先用之前depth计算得到的点云，逐点插入（插入过程中如果待插入点与上一个已插入的点在view中投影足够远）构建四面体。
+ *                  计算score四面体构建的每条边，参考论文（Multi-View Reconstruction PreservingWeakly-Supported Surfaces），最后用graphcut提取重建的曲面。
+ * @param[in] distInsert           // 插入点的最近距离，待插入点与已插入点距离要不小于这个值，小于则不插入。控制插入点的密度，太密集也会影响后续计算效率。
+ * @param[in] bUseFreeSpaceSupport // 
+ * @param[in] nItersFixNonManifold 
+ * @param[in] kSigma 
+ * @param[in] kQual 
+ * @param[in] kb 
+ * @param[in] kf 
+ * @param[in] kRel 
+ * @param[in] kAbs 
+ * @param[in] kOutl 
+ * @param[in] kInf graphcut s-t中s权重为常数默认kInf=(float)(INT_MAX/8)
+ * @return true 
+ * @return false 
+ */
 bool Scene::ReconstructMesh(float distInsert, bool bUseFreeSpaceSupport, unsigned nItersFixNonManifold,
 							float kSigma, float kQual, float kb,
 							float kf, float kRel, float kAbs, float kOutl,
 							float kInf
 )
 {
+	// 数据类型介绍：face是三个顶点组成的一个面。cell是四个不共面顶点组成一个四面体（3 faces）,两个cell要么不相交，
+	// 要么共享一个面facet或一个边edge或者一个顶点vertex 参考:https://doc.cgal.org/latest/Triangulation_3/index.html
 	using namespace DELAUNAY;
 	ASSERT(!pointcloud.IsEmpty());
 	mesh.Release();
-
+    
 	// create the Delaunay triangulation
-	delaunay_t delaunay;
+	// Step 1 Delaunay tetrahedralization 四面体网格划分
+	delaunay_t delaunay;               //四面体类
 	std::vector<cell_info_t> infoCells;
 	std::vector<camera_cell_t> camCells;
 	std::vector<facet_t> hullFacets;
 	{
 		TD_TIMER_STARTD();
 
-		std::vector<point_t> vertices(pointcloud.points.GetSize());
-		std::vector<std::ptrdiff_t> indices(pointcloud.points.GetSize());
+		std::vector<point_t> vertices(pointcloud.points.GetSize());      // 输入点云的三维坐标
+		std::vector<std::ptrdiff_t> indices(pointcloud.points.GetSize());// 存放点的索引。ptrdiff_t类型变量通常用来保存两个指针减法操作的结果。 
 		// fetch points
+		// 将点云存放在vertices，indices中
 		FOREACH(i, pointcloud.points) {
 			const PointCloud::Point& X(pointcloud.points[i]);
 			vertices[i] = point_t(X.x, X.y, X.z);
 			indices[i] = i;
 		}
-		// sort vertices
+		// sort vertices 参考https://doc.cgal.org/latest/Spatial_sorting/index.html#Spatial_sortingIntroduction
+		// 空间排序算法基于Hilbert排序，基本原理是沿着空间切线方向对对象进行排序，以便在顺序插入时两个相邻的点在几何上有较大概率的接近。
+		// 目的是提高插入效率。
 		typedef CGAL::Spatial_sort_traits_adapter_3<delaunay_t::Geom_traits, point_t*> Search_traits;
 		CGAL::spatial_sort(indices.begin(), indices.end(), Search_traits(&vertices[0], delaunay.geom_traits()));
 		// insert vertices
+		// 插入顶点构建四面体
 		Util::Progress progress(_T("Points inserted"), indices.size());
-		const float distInsertSq(SQUARE(distInsert));
-		vertex_handle_t hint;
+		const float distInsertSq(SQUARE(distInsert)); //求平方 
+		vertex_handle_t hint;  // 顶点handle
 		delaunay_t::Locate_type lt;
 		int li, lj;
 		std::for_each(indices.cbegin(), indices.cend(), [&](size_t idx) {
@@ -808,26 +874,32 @@ bool Scene::ReconstructMesh(float distInsert, bool bUseFreeSpaceSupport, unsigne
 			if (hint == vertex_handle_t()) {
 				// this is the first point,
 				// insert it
+				// 初始时hint是空，所以是第一个顶点直接插入
 				hint = delaunay.insert(p);
 				ASSERT(hint != vertex_handle_t());
 			} else
 			if (distInsert <= 0) {
 				// insert all points
+				// 如果插入点间隔不大于0则所有点全部插入，无需再判断
 				hint = delaunay.insert(p, hint);
 				ASSERT(hint != vertex_handle_t());
 			} else {
 				// locate cell containing this point
+				// 获取包含该点的cell和位置lt
 				const cell_handle_t c(delaunay.locate(p, lt, li, lj, hint->cell()));
 				if (lt == delaunay_t::VERTEX) {
 					// duplicate point, nothing to insert,
 					// just update its visibility info
-					hint = c->vertex(li);
+					// 如果位置是在cell的一个顶点上说明该点已经存在，无需再插入直接更新可视信息
+					hint = c->vertex(li); // li是顶点vertex在delaunay的索引
 					ASSERT(hint != delaunay.infinite_vertex());
 				} else {
 					// locate the nearest vertex
+					// 寻找最近点
 					vertex_handle_t nearest;
 					if (delaunay.dimension() < 3) {
-						// use a brute-force algorithm if dimension < 3
+						// use a brute-force algorithm if dimension < 3 
+						// 使用暴力算法逐点查找每个点并与p做比较，找到距离p最近的点
 						delaunay_t::Finite_vertices_iterator vit = delaunay.finite_vertices_begin();
 						nearest = vit;
 						++vit;
@@ -839,10 +911,13 @@ bool Scene::ReconstructMesh(float distInsert, bool bUseFreeSpaceSupport, unsigne
 						// - repeatedly take the nearest of its incident vertices if any
 						// - if not, we're done
 						ASSERT(c != cell_handle_t());
+						// 查找在cell c中距离p最近的点nearest
 						nearest = delaunay.nearest_vertex_in_cell(p, c);
+						// 从最近点nearest的邻接点中查找比nearest距离p更近的点，如果有则更新nearest，重复直到没有
 						while (true) {
 							const vertex_handle_t v(nearest);
 							delaunay.adjacent_vertices(nearest, adjacent_vertex_back_inserter_t(delaunay, p, nearest));
+							// 如果nearest没有更新则完成
 							if (v == nearest)
 								break;
 						}
@@ -850,6 +925,7 @@ bool Scene::ReconstructMesh(float distInsert, bool bUseFreeSpaceSupport, unsigne
 					ASSERT(nearest == delaunay.nearest_vertex(p, hint->cell()));
 					hint = nearest;
 					// check if point is far enough to all existing points
+					// 判断point是否与nearest在所有能看到的view中都近似（深度z，相机坐标系下（xy平面上）距离）
 					FOREACHPTR(pViewID, views) {
 						const Image& imageData = images[*pViewID];
 						const Point3f pn(imageData.camera.ProjectPointP3(point));
@@ -857,6 +933,7 @@ bool Scene::ReconstructMesh(float distInsert, bool bUseFreeSpaceSupport, unsigne
 						if (!IsDepthSimilar(pn.z, pe.z) || normSq(Point2f(pn)-Point2f(pe)) > distInsertSq) {
 							// point far enough to an existing point,
 							// insert as a new point
+							// 如果有一个view不相似则插入
 							hint = delaunay.insert(p, lt, c, li, lj);
 							ASSERT(hint != vertex_handle_t());
 							break;
@@ -865,13 +942,16 @@ bool Scene::ReconstructMesh(float distInsert, bool bUseFreeSpaceSupport, unsigne
 				}
 			}
 			// update point visibility info
+			// 添加点的view信息
 			hint->info().InsertViews(pointcloud, idx);
 			++progress;
 		});
 		progress.close();
 		pointcloud.Release();
 		// init cells weights and
-		// loop over all cells and store the finite facet of the infinite cells
+		// loop over all cells and store the finite facet of the infinite cells（划分的四面体结构体凸包最外层的所有face）
+		// 初始化cell 权重，循环所有cells存储infinite cells（四个点中有一个点是在无限远处）中finite的facet(由另外三个点组成的面，
+		// 即为划分的四面体结构体凸包最外层的所有face)
 		const size_t numNodes(delaunay.number_of_cells());
 		infoCells.resize(numNodes);
 		memset(&infoCells[0], 0, sizeof(cell_info_t)*numNodes);
@@ -879,55 +959,68 @@ bool Scene::ReconstructMesh(float distInsert, bool bUseFreeSpaceSupport, unsigne
 		for (delaunay_t::All_cells_iterator ci=delaunay.all_cells_begin(), eci=delaunay.all_cells_end(); ci!=eci; ++ci, ++ciID) {
 			ci->info() = ciID;
 			// skip the finite cells
+			// 跳过有限的cells
 			if (!delaunay.is_infinite(ci))
 				continue;
 			// find the finite face
+			// 每个cell都有四个面，查找有限的face
 			for (int f=0; f<4; ++f) {
 				const facet_t facet(ci, f);
 				if (!delaunay.is_infinite(facet)) {
 					// store face
+					// 存储该face
 					hullFacets.push_back(facet);
+					// 因为infinite cell有一个顶点是无限远的，故只有一个有限的facet。找到后即可跳出循环
 					break;
 				}
 			}
 		}
 		// find all cells containing a camera
+		// 查找每一个相机包含的所有cells
 		camCells.resize(images.GetSize());
 		FOREACH(i, images) {
 			const Image& imageData = images[i];
 			if (!imageData.IsValid())
 				continue;
-			const Camera& camera = imageData.camera;
-			camera_cell_t& camCell = camCells[i];
+			const Camera& camera = imageData.camera; // 相机参数
+			camera_cell_t& camCell = camCells[i];  // 存储当前图像的cell信息
+			// 查找相机原点所在的cell
 			camCell.cell = delaunay.locate(MVS2CGAL(camera.C));
 			ASSERT(camCell.cell != cell_handle_t());
+			// 寻找所有与该相机相关的facet
+			// camCell.cell是infinite（在凸包外面），则需找到image视锥中包含的所有facet
+			// 如果不是（在凸包内部），只需找到cell的四个facet
 			fetchCellFacets<CGAL::POSITIVE>(delaunay, hullFacets, camCell.cell, imageData, camCell.facets);
 			// link all cells contained by the camera to the source
+			// 将相机包含的所有cell link到s上权重为常数kinf
 			for (const facet_t& f: camCell.facets)
 				infoCells[f.first->info()].s = kInf;
 		}
 
 		DEBUG_EXTRA("Delaunay tetrahedralization completed: %u points -> %u vertices, %u (+%u) cells, %u (+%u) faces (%s)", indices.size(), delaunay.number_of_vertices(), delaunay.number_of_finite_cells(), delaunay.number_of_cells()-delaunay.number_of_finite_cells(), delaunay.number_of_finite_facets(), delaunay.number_of_facets()-delaunay.number_of_finite_facets(), TD_TIMER_GET_FMT().c_str());
 	}
-
+    // Step 参数计算
 	// for every camera-point ray intersect it with the tetrahedrons and
 	// add alpha_vis(point) to cell's directed edge in the graph
 	{
 		TD_TIMER_STARTD();
 
 		// estimate the size of the smallest reconstructible object
+		// 计算所有边edge的边长的平方
 		FloatArr distsSq(0, delaunay.number_of_edges());
 		for (delaunay_t::Finite_edges_iterator ei=delaunay.finite_edges_begin(), eei=delaunay.finite_edges_end(); ei!=eei; ++ei) {
 			const cell_handle_t& c(ei->first);
 			distsSq.Insert(normSq(CGAL2MVS<float>(c->vertex(ei->second)->point()) - CGAL2MVS<float>(c->vertex(ei->third)->point())));
 		}
-		const float sigma(SQRT(distsSq.GetMedian())*kSigma);
+		// 取中值
+		const float sigma(SQRT(distsSq.GetMedian())*kSigma); 
 		const float inv2SigmaSq(0.5f/(sigma*sigma));
 		distsSq.Release();
 
 		std::vector<facet_t> facets;
 
 		// compute the weights for each edge
+		// 计算每条边的权重
 		{
 		TD_TIMER_STARTD();
 		Util::Progress progress(_T("Points weighted"), delaunay.number_of_vertices());
@@ -957,23 +1050,28 @@ bool Scene::ReconstructMesh(float distInsert, bool bUseFreeSpaceSupport, unsigne
 				const Image& imageData = images[imageID];
 				ASSERT(imageData.IsValid());
 				const Camera& camera = imageData.camera;
+				// 该相机所在的cell
 				const camera_cell_t& camCell = camCells[imageID];
 				// compute the ray used to find point intersection
+				// 计算view ray即点到相机原点的vector
 				const Point3 vecCamPoint(pt-camera.C);
-				const REAL invLenCamPoint(REAL(1)/norm(vecCamPoint));
+				const REAL invLenCamPoint(REAL(1)/norm(vecCamPoint)); //归一化
 				intersection_t inter(pt, Point3(vecCamPoint*invLenCamPoint));
 				// find faces intersected by the camera-point segment
-				const segment_t segCamPoint(MVS2CGAL(camera.C), p);
+				// 寻找凸包中被上述ray穿过的所有face
+				const segment_t segCamPoint(MVS2CGAL(camera.C), p);// 分割线的起始点
+				// 寻找与该seg线段相交的facet并返回下一个待check是否相交的facet，inter存储的是相交的信息
 				if (!intersect(delaunay, segCamPoint, camCell.facets, facets, inter))
 					continue;
 				do {
 					// assign score, weighted by the distance from the point to the intersection
+					// 计算权重，根据点到相交面的相交距离计算
 					const edge_cap_t w(alpha_vis*(1.f-EXP(-SQUARE((float)inter.dist)*inv2SigmaSq)));
 					edge_cap_t& f(infoCells[inter.facet.first->info()].f[inter.facet.second]);
 					#ifdef DELAUNAY_USE_OPENMP
 					#pragma omp atomic
 					#endif
-					f += w;
+					f += w;// 加到对应face的权重上
 				} while (intersect(delaunay, segCamPoint, facets, facets, inter));
 				ASSERT(facets.empty() && inter.type == intersection_t::VERTEX && inter.v1 == vi);
 				#ifdef DELAUNAY_WEAKSURF
@@ -981,6 +1079,7 @@ bool Scene::ReconstructMesh(float distInsert, bool bUseFreeSpaceSupport, unsigne
 				vert.viewsInfo[v].cell2Cam = inter.facet.first;
 				#endif
 				// find faces intersected by the endpoint-point segment
+				// 寻找与endpoint到point的segment相交的faces,计算同上类似
 				inter.dist = FLT_MAX; inter.bigger = false;
 				const Point3 endPoint(pt+vecCamPoint*(invLenCamPoint*sigma));
 				const segment_t segEndPoint(MVS2CGAL(endPoint), p);
@@ -994,6 +1093,7 @@ bool Scene::ReconstructMesh(float distInsert, bool bUseFreeSpaceSupport, unsigne
 				t += alpha_vis;
 				while (intersect(delaunay, segEndPoint, facets, facets, inter)) {
 					// assign score, weighted by the distance from the point to the intersection
+					// 权重计算方式同上
 					const facet_t& mf(delaunay.mirror_facet(inter.facet));
 					const edge_cap_t w(alpha_vis*(1.f-EXP(-SQUARE((float)inter.dist)*inv2SigmaSq)));
 					edge_cap_t& f(infoCells[mf.first->info()].f[mf.second]);
@@ -1041,12 +1141,14 @@ bool Scene::ReconstructMesh(float distInsert, bool bUseFreeSpaceSupport, unsigne
 				ASSERT(imageData.IsValid());
 				const Camera& camera = imageData.camera;
 				// compute the ray used to find point intersection
+				// 计算ray 
 				const Point3f vecCamPoint(pt-Cast<float>(camera.C));
 				const float invLenCamPoint(1.f/norm(vecCamPoint));
 				// find faces intersected by the point-camera segment and keep the max free-space support score
 				const Point3f bgnPoint(pt-vecCamPoint*(invLenCamPoint*sigma*kf));
 				const segment_t segPointBgn(p, MVS2CGAL(bgnPoint));
 				intersection_t inter;
+				// 寻找与点-相机线段相交在面上的面 保留最大的score
 				if (!intersectFace(delaunay, segPointBgn, vi, vert.viewsInfo[v].cell2Cam, facets, inter))
 					continue;
 				edge_cap_t beta(0);
@@ -1056,6 +1158,7 @@ bool Scene::ReconstructMesh(float distInsert, bool bUseFreeSpaceSupport, unsigne
 						beta = fs;
 				} while (intersectFace(delaunay, segPointBgn, facets, facets, inter));
 				// find faces intersected by the point-endpoint segment
+				// 寻找 point-endpoint相交的面
 				const Point3f endPoint(pt+vecCamPoint*(invLenCamPoint*sigma*kb));
 				const segment_t segPointEnd(p, MVS2CGAL(endPoint));
 				if (!intersectFace(delaunay, segPointEnd, vi, vert.viewsInfo[v].cell2End, facets, inter))
@@ -1071,6 +1174,7 @@ bool Scene::ReconstructMesh(float distInsert, bool bUseFreeSpaceSupport, unsigne
 				const edge_cap_t gamma((gammaMin+gammaMax)*0.5f);
 				// if the point can be considered an interface point,
 				// enforce the t-edge weight of the end cell
+				// 如果点被认为是一个相交点则加强t值
 				const edge_cap_t epsAbs(beta-gamma);
 				const edge_cap_t epsRel(gamma/beta);
 				if (epsRel < kRel && epsAbs > kAbs && gamma < kOutl) {
@@ -1090,15 +1194,19 @@ bool Scene::ReconstructMesh(float distInsert, bool bUseFreeSpaceSupport, unsigne
 	}
 
 	// run graph-cut and extract the mesh
+	// 根据上面计算的s-t权重计算graph-cut提取mesh
 	{
 		TD_TIMER_STARTD();
 
 		// create graph
+		// 最大流
 		MaxFlow<cell_size_t,edge_cap_t> graph(delaunay.number_of_cells());
 		// set weights
+		// 设置权重
 		for (delaunay_t::All_cells_iterator ci=delaunay.all_cells_begin(), ce=delaunay.all_cells_end(); ci!=ce; ++ci) {
 			const cell_size_t ciID(ci->info());
 			const cell_info_t& ciInfo(infoCells[ciID]);
+			// 添加节点（cell）
 			graph.AddNode(ciID, ciInfo.s, ciInfo.t);
 			for (int i=0; i<4; ++i) {
 				const cell_handle_t cj(ci->neighbor(i));
@@ -1107,13 +1215,16 @@ bool Scene::ReconstructMesh(float distInsert, bool bUseFreeSpaceSupport, unsigne
 				const cell_info_t& cjInfo(infoCells[cjID]);
 				const int j(cj->index(ci));
 				const edge_cap_t q((1.f - MINF(computePlaneSphereAngle(delaunay, facet_t(ci,i)), computePlaneSphereAngle(delaunay, facet_t(cj,j))))*kQual);
+				//添加边（face）
 				graph.AddEdge(ciID, cjID, ciInfo.f[i]+q, cjInfo.f[j]+q);
 			}
 		}
 		infoCells.clear();
 		// find graph-cut solution
+		// 计算最大流
 		const float maxflow(graph.ComputeMaxFlow());
 		// extract surface formed by the facets between inside/outside cells
+		// 提取面根据cell是在面的外侧还是内侧
 		const size_t nEstimatedNumVerts(delaunay.number_of_vertices());
 		std::unordered_map<void*,Mesh::VIndex> mapVertices;
 		#if defined(_MSC_VER) && (_MSC_VER > 1600)
@@ -1129,8 +1240,10 @@ bool Scene::ReconstructMesh(float distInsert, bool bUseFreeSpaceSupport, unsigne
 				const cell_size_t cjID(cj->info());
 				if (ciID < cjID) continue;
 				const bool ciType(graph.IsNodeOnSrcSide(ciID));
+				// 如果cell与邻域cell属于同一侧则跳过，否则两者的交面就是mesh的面
 				if (ciType == graph.IsNodeOnSrcSide(cjID)) continue;
 				Mesh::Face& face = mesh.faces.AddEmpty();
+				// 计算相交面tri,将面和三个顶点插入mesh中
 				const triangle_vhandles_t tri(getTriangle(ci, i));
 				for (int v=0; v<3; ++v) {
 					const vertex_handle_t vh(tri.verts[v]);
@@ -1152,6 +1265,7 @@ bool Scene::ReconstructMesh(float distInsert, bool bUseFreeSpaceSupport, unsigne
 	}
 
 	// fix non-manifold vertices and edges
+	// 修复非流行的顶点和边
 	for (unsigned i=0; i<nItersFixNonManifold; ++i)
 		if (!mesh.FixNonManifold())
 			break;

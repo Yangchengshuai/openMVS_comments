@@ -41,7 +41,8 @@
 // D E F I N E S ///////////////////////////////////////////////////
 
 // similarity method
-// 匹配代价计算两种方式：基于census，基于带权重ncc
+// 匹配代价计算两种方式：基于census，基于带权重ncc，由于带权重ncc在patchMatch中已经讲过，
+// 所以sgm 主要介绍基于census的代价匹配
 #define SGM_SIMILARITY_WZNCC 1
 #define SGM_SIMILARITY_CENSUS 2 
 #define SGM_SIMILARITY SGM_SIMILARITY_WZNCC
@@ -75,23 +76,23 @@ public:
 	enum : Index     { NO_INDEX = DECLARE_NO_INDEX(Index) }; // invalid index value
 
 	struct Range {
-		Disparity minDisp;
-		Disparity maxDisp;
+		Disparity minDisp; //最小视差
+		Disparity maxDisp; //最大视差
 		Disparity avgDisp() const { return (minDisp+maxDisp)>>1; }
 		Disparity numDisp() const { return maxDisp-minDisp; }
 		Disparity isValid() const { return minDisp<maxDisp; }
 	};
 	struct PixelData {
-		Index idx; // index to pixel costs/accumulated-costs data
-		Range range; // first and last disparity evaluated for this pixel 记录视差范围
+		Index idx; //   在代价里面的所有index to pixel costs/accumulated-costs data
+		Range range; // 视差范围 first and last disparity evaluated for this pixel 记录视差范围
 	};
 
-	typedef TImage<Mask> MaskMap; // image of accumulated disparity cost
-	typedef TImage<Disparity> DisparityMap; // disparity image type
-	typedef TImage<AccumCost> AccumCostMap; // image of accumulated disparity cost
-	typedef CLISTDEF0IDX(PixelData,Index) PixelMap; // map of pixel data
-	typedef CLISTDEF0IDX(Cost,Index) CostsMap; // map of pre-computed disparity costs
-	typedef CLISTDEF0IDX(AccumCost,Index) AccumCostsMap; // map of accumulated disparity costs
+	typedef TImage<Mask> MaskMap; //   累计视差代价的图像对应maskimage of accumulated disparity cost
+	typedef TImage<Disparity> DisparityMap; // 视差图disparity image type
+	typedef TImage<AccumCost> AccumCostMap; // 累计视差代价的图像image of accumulated disparity cost
+	typedef CLISTDEF0IDX(PixelData,Index) PixelMap; // 像素map map of pixel data
+	typedef CLISTDEF0IDX(Cost,Index) CostsMap; // 预先计算的视差map map of pre-computed disparity costs
+	typedef CLISTDEF0IDX(AccumCost,Index) AccumCostsMap; // 累加视差代价map map of accumulated disparity costs
 
 	enum : int { numDirs = 4 }; // 2 or 4 directions accumulated per pixel pass
 	#if SGM_SIMILARITY == SGM_SIMILARITY_CENSUS
@@ -102,9 +103,9 @@ public:
 	enum : int { windowSizeX = halfWindowSizeX*2+1, windowSizeY = halfWindowSizeY*2+1, numTexels = windowSizeX*windowSizeY }; // patch kernel info
 
 	#if SGM_SIMILARITY == SGM_SIMILARITY_CENSUS
-	typedef uint64_t Census; // used to store Census transform
-	typedef TImage<Census> CensusMap; // image of Census transforms
-	typedef Image8U ImageGray; // used to store intensities image
+	typedef uint64_t Census; // census 值used to store Census transform
+	typedef TImage<Census> CensusMap; // census图image of Census transforms
+	typedef Image8U ImageGray; // 灰度图 used to store intensities image
 	STATIC_ASSERT(sizeof(Census)*8 >= numTexels);
 	#else
 	typedef WeightedPatchFix<numTexels> WeightedPatch; // pre-computed patch weights
@@ -124,14 +125,15 @@ public:
 	};
 
 	struct ViewData {
-		Image8U3 imageColor; // color image
-		ImageGray imageGray; // intensity image
+		Image8U3 imageColor; // 彩色图color image
+		ImageGray imageGray; // 灰度图intensity image
 		#if SGM_SIMILARITY == SGM_SIMILARITY_CENSUS
-		CensusMap imageCensus; // image of Census transforms (valid per scale)
+		CensusMap imageCensus; // census图像image of Census transforms (valid per scale)
 		#endif
 		ViewData GetImage(REAL scale) const {
 			if (ISEQUAL(scale, REAL(1))) {
 				#if SGM_SIMILARITY == SGM_SIMILARITY_CENSUS
+				// census计算
 				CensusTransform(imageGray, const_cast<CensusMap&>(imageCensus));
 				#endif
 				return *this;

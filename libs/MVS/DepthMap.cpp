@@ -356,7 +356,7 @@ bool DepthEstimator::PreparePixelPatch(const ImageRef& x)
 	       image0.image.isInside(ImageRef(x.x+nSizeHalfWindow, x.y+nSizeHalfWindow));
 }
 // fetch the patch pixel values in the main image
-//
+// 在reference图像上计算patch 值
 bool DepthEstimator::FillPixelPatch()
 {
 	#if DENSE_NCC != DENSE_NCC_WEIGHTED
@@ -417,6 +417,7 @@ float DepthEstimator::ScorePixelImage(const ViewData& image1, Depth depth, const
 	//计算H矩阵参考Accurate Multiple View 3D Reconstruction Using Patch-Based Stereo for Large-Scale Scenes 公式5
 	Matrix3x3f H(ComputeHomographyMatrix(image1, depth, normal));
 	Point3f X;
+	// 投影patch最左上角点到target image得到坐标X
 	ProjectVertex_3x3_2_3(H.val, Point2f(float(x0.x-nSizeHalfWindow),float(x0.y-nSizeHalfWindow)).ptr(), X.ptr());
 	Point3f baseX(X);
 	H *= float(nSizeStep);
@@ -428,6 +429,9 @@ float DepthEstimator::ScorePixelImage(const ViewData& image1, Depth depth, const
 	#if DENSE_NCC == DENSE_NCC_WEIGHTED
 	const Weight& w = weightMap0[x0.y*image0.image.width()+x0.x];
 	#endif
+	// 计算target image 的ncc值
+	// nSizeStep 抽像素计算不是窗口内每个点都计算。 
+	
 	for (int i=-nSizeHalfWindow; i<=nSizeHalfWindow; i+=nSizeStep) {
 		for (int j=-nSizeHalfWindow; j<=nSizeHalfWindow; j+=nSizeStep) {
 			const Point2f pt(X);
@@ -447,6 +451,7 @@ float DepthEstimator::ScorePixelImage(const ViewData& image1, Depth depth, const
 			#else
 			sum += texels1(n++)=v;
 			#endif
+			// H矩阵是3*3矩阵每次像素上平移一个nsizestep单位，推导出来新的坐标如下：见笔记详细推导
 			X.x += H[0]; X.y += H[3]; X.z += H[6];
 		}
 		baseX.x += H[1]; baseX.y += H[4]; baseX.z += H[7];
@@ -454,6 +459,7 @@ float DepthEstimator::ScorePixelImage(const ViewData& image1, Depth depth, const
 	}
 	ASSERT(n == nTexels);
 	// score similarity of the reference and target texture patches
+	// 计算reference与target的相似性
 	#if DENSE_NCC == DENSE_NCC_FAST
 	const float normSq1(sumSq-SQUARE(sum/nSizeWindow));
 	#elif DENSE_NCC == DENSE_NCC_WEIGHTED
@@ -487,17 +493,18 @@ float DepthEstimator::ScorePixelImage(const ViewData& image1, Depth depth, const
 }
 
 // compute pixel's NCC score
-//计算像素点的NCC值 
+// 计算像素点的NCC值和confidence
 float DepthEstimator::ScorePixel(Depth depth, const Normal& normal)
 {
 	ASSERT(depth > 0 && normal.dot(Cast<float>(static_cast<const Point3&>(X0))) <= 0);
 	// compute score for this pixel as seen in each view
+	// 计算当前像素在每个邻域view的匹配代价
 	ASSERT(scores.size() == images.size());
-	FOREACH(idxView, images)
+	FOREACH(idxView, images)// images存放的是邻域views
 		scores[idxView] = ScorePixelImage(images[idxView], depth, normal);
 	#if DENSE_AGGNCC == DENSE_AGGNCC_NTH
 	// set score as the nth element
-	//直接从邻域view的score中返回第N小的score
+	// 直接从邻域view的score中返回第N小的score
 	return scores.GetNth(idxScore);
 	#elif DENSE_AGGNCC == DENSE_AGGNCC_MEAN
 	// set score as the average similarity
@@ -516,14 +523,16 @@ float DepthEstimator::ScorePixel(Depth depth, const Normal& normal)
 	#elif DENSE_AGGNCC == DENSE_AGGNCC_MIN
 	// set score as the min similarity
 	return scores.minCoeff();
-	#else
+	#else//DENSE_AGGNCC_MINMEAN
 	// set score as the min-mean similarity
+	// idxScore(_depthData0.images.size()<=2 ? 0u : 1u),
+	// 如果邻域不大于2 直接返回最小值
 	if (idxScore == 0)
 		return *std::min_element(scores.cbegin(), scores.cend());
 	#if 0
 	return std::accumulate(scores.cbegin(), &scores.GetNth(idxScore), 0.f) / idxScore;
 	#elif 1
-	//
+	// 将前n小的score加起来算平均值
 	const float* pescore(&scores.GetNth(idxScore));
 	const float* pscore(scores.cbegin());
 	int n(1); float score(*pscore);
@@ -554,6 +563,7 @@ float DepthEstimator::ScorePixel(Depth depth, const Normal& normal)
 
 // run propagation and random refinement cycles;
 // the solution belonging to the target image can be also propagated
+// 逐像素计算depth，采用传播和随机refine策略
 void DepthEstimator::ProcessPixel(IDX idx)
 {
 	// compute pixel coordinates from pixel index and its neighbors
@@ -689,7 +699,7 @@ void DepthEstimator::ProcessPixel(IDX idx)
 	ASSERT(depth > 0 && normal.dot(viewDir) <= 0);
 	#if DENSE_REFINE == DENSE_REFINE_ITER
 	// check if any of the neighbor estimates are better then the current estimate
-	//邻域传播
+	// 邻域传播
 	#if DENSE_SMOOTHNESS != DENSE_SMOOTHNESS_NA
 	FOREACH(n, neighbors) {
 		const ImageRef& nx = neighbors[n];
@@ -702,7 +712,7 @@ void DepthEstimator::ProcessPixel(IDX idx)
 		#if DENSE_SMOOTHNESS != DENSE_SMOOTHNESS_NA
 		NeighborEstimate& neighbor = neighborsClose[n];
 		#endif
-		//计算x0在邻域patch平面上的depth值
+		// 计算x0在邻域patch平面上的depth值
 		neighbor.depth = InterpolatePixel(nx, neighbor.depth, neighbor.normal);
 		CorrectNormal(neighbor.normal);
 		ASSERT(neighbor.depth > 0 && neighbor.normal.dot(viewDir) <= 0);
@@ -718,10 +728,10 @@ void DepthEstimator::ProcessPixel(IDX idx)
 		}
 	}
 	// try random values around the current estimate in order to refine it
-	//随机分配：在当前depth值下上下加随机值来找最优值来进一步优化
+	// 随机分配：在当前depth值下上下加随机值来找最优值来进一步优化
 	unsigned idxScaleRange(0);
 	RefineIters:
-	//idxScaleRange越小随机区间越大，如果conf比较低说明当前深度值准确度越低，所以随机区间应该大些才有可能找到更准确的值。
+	// idxScaleRange越小随机区间越大，如果conf比较低说明当前深度值准确度越低，所以随机区间应该大些才有可能找到更准确的值。
 	if (conf <= thConfSmall)
 		idxScaleRange = 2;
 	else if (conf <= thConfBig)
@@ -746,7 +756,7 @@ void DepthEstimator::ProcessPixel(IDX idx)
 	float scaleRange(scaleRanges[idxScaleRange]);
 	const float depthRange(MaxDepthDifference(depth, OPTDENSE::fRandomDepthRatio));
 	Point2f p;
-	//将单位法向量转成两个方位角，笔记有图推导
+	// 将单位法向量转成两个方位角，笔记有图推导
 	Normal2Dir(normal, p);
 	Normal nnormal;
 	for (unsigned iter=0; iter<OPTDENSE::nRandomIters; ++iter) {
@@ -770,7 +780,7 @@ void DepthEstimator::ProcessPixel(IDX idx)
 			scaleRange = scaleRanges[++idxScaleRange];
 		}
 	}
-	#else
+	#else//后面不用看
 	// current pixel estimate
 	PixelEstimate currEstimate{depth, normal};
 	// propagate depth estimate from the best neighbor estimate
@@ -794,16 +804,17 @@ void DepthEstimator::ProcessPixel(IDX idx)
 		#endif
 		if (neighbor.normal.dot(viewDir) >= 0)
 			continue;
-		//计算x0在邻域patch平面上的depth值
+		// 计算x0在邻域patch平面上的depth值
 		prevEstimate.depth = InterpolatePixel(nx, neighbor.depth, neighbor.normal);
 		prevEstimate.normal = neighbor.normal;
-		//调整法线方向保证法线与视线方向夹角在90内
+		// 调整法线方向保证法线与视线方向夹角在90内
 		CorrectNormal(prevEstimate.normal);
 		prevCost = nconf;
 	}
 	if (prevCost == FLT_MAX)
 		prevEstimate = PerturbEstimate(currEstimate, thPerturbation);
 	// randomly sampled estimate
+	// 添加扰动选取最好的depth
 	PixelEstimate randEstimate(PerturbEstimate(currEstimate, thPerturbation));
 	// select best pixel estimate
 	const int numCosts = 5;
@@ -897,6 +908,7 @@ Depth DepthEstimator::InterpolatePixel(const ImageRef& nx, Depth depth, const No
 
 #if DENSE_SMOOTHNESS == DENSE_SMOOTHNESS_PLANE
 // compute plane defined by current depth and normal estimate
+// 平面构建 nx-d=0
 void DepthEstimator::InitPlane(Depth depth, const Normal& normal)
 {
 	//平面方程：Nx+d=0
@@ -910,6 +922,13 @@ void DepthEstimator::InitPlane(Depth depth, const Normal& normal)
 #endif
 
 #if DENSE_REFINE == DENSE_REFINE_EXACT
+/**
+ * @brief 对depth 和normal添加一个小的扰动，有助于寻找最佳值
+ * 
+ * @param[in] est            depth和normal
+ * @param[in] perturbation   扰动量
+ * @return PixelEstimate     添加扰动后的depth，normal
+ */
 DepthEstimator::PixelEstimate DepthEstimator::PerturbEstimate(const PixelEstimate& est, float perturbation)
 {
 	PixelEstimate ptbEst;
@@ -925,6 +944,7 @@ DepthEstimator::PixelEstimate DepthEstimator::PerturbEstimate(const PixelEstimat
 	const int numMaxTrials = 3;
 	int numTrials = 0;
 	perturbation *= FHALF_PI;
+	// 寻找一个法线最小扰动量
 	while(true) {
 		// generate random perturbation rotation
 		// 增加旋转扰动，旋转法向量
@@ -966,7 +986,7 @@ typedef kernel_t::Point_3 Point;
 
 // triangulate in-view points, generating a 2D mesh
 // return also the estimated depth boundaries (min and max depth)
-//将3d 点投影到depth上进行三角网格化
+// 将稀疏特征点投影到depth上进行三角网格化
 std::pair<float,float> TriangulatePointsDelaunay(const DepthData::ViewData& image, const PointCloud& pointcloud, const IndexArr& points, CGAL::Delaunay& delaunay)
 {
 	ASSERT(sizeof(Point3) == sizeof(X3D));
@@ -981,11 +1001,13 @@ std::pair<float,float> TriangulatePointsDelaunay(const DepthData::ViewData& imag
 			depthBounds.second = pt.z;
 	}
 	// if full size depth-map requested
+	// 如果稀疏点在图像四个角落没值的话，因为三角化是一个凸包无法覆盖整个图像如果需要整个图像可以添加角点用深度平均值表示
 	if (OPTDENSE::bAddCorners) {
 		typedef TIndexScore<float,float> DepthDist;
 		typedef CLISTDEF0(DepthDist) DepthDistArr;
 		typedef Eigen::Map< Eigen::VectorXf, Eigen::Unaligned, Eigen::InnerStride<2> > FloatMap;
 		// add the four image corners at the average depth
+		// 加图像四个角点，depth用平均值
 		ASSERT(image.pImageData->IsValid() && ISINSIDE(image.pImageData->avgDepth, depthBounds.first, depthBounds.second));
 		const CGAL::VertexHandle vcorners[] = {
 			delaunay.insert(CGAL::Point(0, 0, image.pImageData->avgDepth)),
@@ -1050,6 +1072,19 @@ std::pair<float,float> TriangulatePointsDelaunay(const DepthData::ViewData& imag
 
 // roughly estimate depth and normal maps by triangulating the sparse point cloud
 // and interpolating normal and depth for all pixels
+/**
+ * @brief depth初始化，利用稀疏点投影到depth上，对这些点进行三角网格划分然后在每个三角面上插值得到每个像素的depth和法向量
+ * 
+ * @param[in] image       图像信息
+ * @param[in] pointcloud  稀疏点云
+ * @param[in] points      当前帧能看到的稀疏点云索引
+ * @param[in] depthMap    待初始化的深度图
+ * @param[in] normalMap   待初始化的法线图
+ * @param[in] dMin        深度图最大值（由稀疏点投影的深度决定）
+ * @param[in] dMax        深度图最小值（同上）
+ * @return true           初始化成功
+ * @return false          失败
+ */
 bool MVS::TriangulatePoints2DepthMap(
 	const DepthData::ViewData& image, const PointCloud& pointcloud, const IndexArr& points,
 	DepthMap& depthMap, NormalMap& normalMap, Depth& dMin, Depth& dMax)
@@ -1057,7 +1092,8 @@ bool MVS::TriangulatePoints2DepthMap(
 	ASSERT(image.pImageData != NULL);
 
 	// triangulate in-view points
-	CGAL::Delaunay delaunay;
+	CGAL::Delaunay delaunay; // 2d 三角化网格
+	// 将稀疏点投影2d 进行三角网格划分。
 	const std::pair<float,float> thDepth(TriangulatePointsDelaunay(image, pointcloud, points, delaunay));
 	dMin = thDepth.first;
 	dMax = thDepth.second;
@@ -1117,11 +1153,13 @@ bool MVS::TriangulatePoints2DepthMap(
 
 	// triangulate in-view points
 	CGAL::Delaunay delaunay;
+	// 将稀疏点划分为三角网格
 	const std::pair<float,float> thDepth(TriangulatePointsDelaunay(image, pointcloud, points, delaunay));
 	dMin = thDepth.first;
 	dMax = thDepth.second;
 
 	// create rough depth-map by interpolating inside triangles
+	// 在三角网格内插值来初始化depth
 	const Camera& camera = image.camera;
 	depthMap.create(image.image.size());
 	if (!OPTDENSE::bAddCorners)
@@ -1133,6 +1171,7 @@ bool MVS::TriangulatePoints2DepthMap(
 		inline void operator()(const ImageRef& pt) {
 			if (!depthMap.isInside(pt))
 				return;
+			// 同一个平面上满足方程n/d*x=1 n/d*k(u,v,1)*z=1 z=1/(n/d*k(u,v,1))
 			const Depth z((Depth)INVERT(normalPlane.dot(P.TransformPointI2C(Point2f(pt)))));
 			if (z <= 0) // due to numerical instability
 				return;
@@ -1141,19 +1180,23 @@ bool MVS::TriangulatePoints2DepthMap(
 	};
 	RasterDepthDataPlaneData data = {camera, depthMap};
 	for (CGAL::Delaunay::Face_iterator it=delaunay.faces_begin(); it!=delaunay.faces_end(); ++it) {
-		const CGAL::Delaunay::Face& face = *it;
+		const CGAL::Delaunay::Face& face = *it;// face 表示一个三角形，由三个顶点组成每个顶点（u,v,depth）
 		const Point3f i0(reinterpret_cast<const Point3d&>(face.vertex(0)->point()));
 		const Point3f i1(reinterpret_cast<const Point3d&>(face.vertex(1)->point()));
 		const Point3f i2(reinterpret_cast<const Point3d&>(face.vertex(2)->point()));
 		// compute the plane defined by the 3 points
+		// 计算三个顶点的相机坐标系下的坐标
 		const Point3f c0(camera.TransformPointI2C(i0));
 		const Point3f c1(camera.TransformPointI2C(i1));
 		const Point3f c2(camera.TransformPointI2C(i2));
 		const Point3f edge1(c1-c0);
 		const Point3f edge2(c2-c0);
+		// 三角形组成的面的法线：两条边叉乘
 		const Normal normal(normalized(edge2.cross(edge1)));
+		// 平面表示n/d  
 		data.normalPlane = normal * INVERT(normal.dot(c0));
 		// draw triangle and for each pixel compute depth as the ray intersection with the plane
+		// 将每个三角形进行栅格化得到面内投影的每一个像素坐标再利用平面信息插值
 		Image8U::RasterizeTriangle(
 			reinterpret_cast<const Point2f&>(i2),
 			reinterpret_cast<const Point2f&>(i1),

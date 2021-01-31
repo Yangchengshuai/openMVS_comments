@@ -113,15 +113,15 @@ public:
 	DepthDataArr arrDepthData;// 存放的是每帧depth（见数据结构DepthData)和对应的Id。
 
 	// used internally to estimate the depth-maps
-	Image8U::Size prevDepthMapSize; // remember the size of the last estimated depth-map
-	Image8U::Size prevDepthMapSizeTrg; // ... same for target image
-	DepthEstimator::MapRefArr coords; // map pixel index to zigzag matrix coordinates
-	DepthEstimator::MapRefArr coordsTrg; // ... same for target image
+	Image8U::Size prevDepthMapSize;      // 记录上一个重建的depth的大小，remember the size of the last estimated depth-map
+	Image8U::Size prevDepthMapSizeTrg;   // 记录上一个重建depth的target图像大小... same for target image
+	DepthEstimator::MapRefArr coords;    // 之字形搜索与图像坐标的映射，refer图像，map pixel index to zigzag matrix coordinates
+	DepthEstimator::MapRefArr coordsTrg; // 之字形搜索与图像坐标的映射，target image
 };
 /*----------------------------------------------------------------*/
 
 struct MVS_API DenseDepthMapData {
-	Scene& scene;
+	Scene& scene;			
 	IIndexArr images; 
 	IIndexArr neighborsMap;//记录每帧对应的参考帧
 	DepthMapsData depthMaps;
