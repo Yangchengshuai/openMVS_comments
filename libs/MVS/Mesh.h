@@ -52,10 +52,10 @@ class MVS_API Mesh
 public:
 	typedef float Type;
 
-	typedef TPoint3<Type> Vertex;
-	typedef uint32_t VIndex;
-	typedef TPoint3<VIndex> Face;
-	typedef uint32_t FIndex;
+	typedef TPoint3<Type> Vertex; // 顶点坐标
+	typedef uint32_t VIndex;      // 顶点索引
+	typedef TPoint3<VIndex> Face; // 面的三个顶点索引
+	typedef uint32_t FIndex;      // 面的索引
 
 	typedef cList<Vertex,const Vertex&,0,8192,VIndex> VertexArr;
 	typedef cList<Face,const Face&,0,8192,FIndex> FaceArr;
@@ -86,15 +86,15 @@ public:
 	VertexArr vertices;
 	FaceArr faces;
 
-	NormalArr vertexNormals; // for each vertex, the normal to the surface in that point (optional)
-	VertexVerticesArr vertexVertices; // for each vertex, the list of adjacent vertices (optional)
-	VertexFacesArr vertexFaces; // for each vertex, the list of faces containing it (optional)
-	BoolArr vertexBoundary; // for each vertex, stores if it is at the boundary or not (optional)
+	NormalArr vertexNormals; // 顶点法线 for each vertex, the normal to the surface in that point (optional)
+	VertexVerticesArr vertexVertices; //对每个顶点，所有与其相邻的顶点 for each vertex, the list of adjacent vertices (optional)
+	VertexFacesArr vertexFaces; // 对每个顶点，与包含其的所有faces.for each vertex, the list of faces containing it (optional)
+	BoolArr vertexBoundary; // 存储每个顶点是否在边界 for each vertex, stores if it is at the boundary or not (optional)
 
-	NormalArr faceNormals; // for each face, the normal to it (optional)
-	TexCoordArr faceTexcoords; // for each face, the texture-coordinates corresponding to the contained vertices (optional)
+	NormalArr faceNormals; //每个face的法线 for each face, the normal to it (optional)
+	TexCoordArr faceTexcoords; // 每个face的纹理坐标for each face, the texture-coordinates corresponding to the contained vertices (optional)
 
-	Image8U3 textureDiffuse; // texture containing the diffuse color (optional)
+	Image8U3 textureDiffuse; // 包含漫反射的纹理 texture containing the diffuse color (optional)
 
 	#ifdef _USE_CUDA
 	static CUDA::KernelRT kernelComputeFaceNormal;
