@@ -502,7 +502,7 @@ bool Scene::Save(const String& fileName, ARCHIVE_TYPE type) const
 } // Save
 /*----------------------------------------------------------------*/
 
-
+// f/d
 inline float Footprint(const Camera& camera, const Point3f& X) {
 	#if 0
 	const REAL fSphereRadius(1);
@@ -518,20 +518,32 @@ inline float Footprint(const Camera& camera, const Point3f& X) {
 // extract also all 3D points seen by the reference image;
 // (inspired by: "Multi-View Stereo for Community Photo Collections", Goesele, 2007)
 // 邻域帧选择 
+/**
+ * @brief 邻域帧选择
+ * 
+ * @param[in] ID                  当前帧id，计算其邻域帧
+ * @param[in] points              当前帧看到的所有三维稀疏点
+ * @param[in] nMinViews           最小邻域 如果帧邻域小于该值认为没有足够邻域无法深度图计算
+ * @param[in] nMinPointViews      用来判断有效点，如果能看大3d点的view大于该阈值则保存
+ * @param[in] fOptimAngle         角度阈值，越接近该值邻域帧越适合当前帧默认10°
+ * @return true 
+ * @return false 
+ */
 bool Scene::SelectNeighborViews(uint32_t ID, IndexArr& points, unsigned nMinViews, unsigned nMinPointViews, float fOptimAngle)
 {
 	ASSERT(points.IsEmpty());
 
 	// extract the estimated 3D points and the corresponding 2D projections for the reference image
+	// 利用输入的稀疏点投影到refer帧上计算2D 投影坐标
 	Image& imageData = images[ID];
 	ASSERT(imageData.IsValid());
 	ViewScoreArr& neighbors = imageData.neighbors;
 	ASSERT(neighbors.IsEmpty());
 	struct Score {
-		float score;
-		float avgScale;
-		float avgAngle;
-		uint32_t points;
+		float score;    // 衡量邻域帧与当前帧匹配程度
+		float avgScale; // 当前帧与邻域帧的平均尺度
+		float avgAngle; // 共视点在两个图像夹角平均值
+		uint32_t points;// 共视点个数
 	};
 	// 该变量size是所有帧的数量，用来存储所有帧与当前帧的共视信息以便筛选neighborViews
 	CLISTDEF0(Score) scores(images.GetSize());
@@ -549,23 +561,26 @@ bool Scene::SelectNeighborViews(uint32_t ID, IndexArr& points, unsigned nMinView
 		ASSERT(views.IsSorted());
 		if (views.FindFirst(ID) == PointCloud::ViewArr::NO_INDEX)
 			continue;
-		// store this point
+		// store this point 存储point
 		const PointCloud::Point& point = pointcloud.points[idx];
 		if (views.GetSize() >= nMinPointViews)
 			points.Insert((uint32_t)idx);
 		imageData.avgDepth += (float)imageData.camera.PointDepth(point);
 		++nPoints;
 		// score shared views
+		// score 共视views
 		const Point3f V1(imageData.camera.C - Cast<REAL>(point));
-		const float footprint1(Footprint(imageData.camera, point));
+		const float footprint1(Footprint(imageData.camera, point)); // f/d 
 		for (const PointCloud::View& view: views) {
 			if (view == ID)
 				continue;
 			const Image& imageData2 = images[view];
 			const Point3f V2(imageData2.camera.C - Cast<REAL>(point));
+			// 共视点与左右相机中心的连线的夹角
 			const float fAngle(ACOS(ComputeAngle<float,float>(V1.ptr(), V2.ptr())));
 			const float wAngle(MINF(POW(fAngle/fOptimAngle, 1.5f), 1.f));
 			const float footprint2(Footprint(imageData2.camera, point));
+			// 视差与深度的关系 depth=fb/dis  dis=fb/depth  fScaleRatio即为视差之比也可以代表两个图像的尺度关系
 			const float fScaleRatio(footprint1/footprint2);
 			float wScale;
 			if (fScaleRatio > 1.6f)
@@ -598,6 +613,7 @@ bool Scene::SelectNeighborViews(uint32_t ID, IndexArr& points, unsigned nMinView
 			continue;
 		ASSERT(ID != IDB);
 		// compute how well the matched features are spread out (image covered area)
+		// 计算匹配的特征点覆盖的面积
 		const Point2f boundsA(imageData.GetSize());
 		const Point2f boundsB(imageDataB.GetSize());
 		ASSERT(projs.IsEmpty());
@@ -619,6 +635,7 @@ bool Scene::SelectNeighborViews(uint32_t ID, IndexArr& points, unsigned nMinView
 		const float area(ComputeCoveredArea<float,2,16,false>((const float*)projs.Begin(), projs.GetSize(), boundsA.ptr()));
 		projs.Empty();
 		// store image score
+		// 存储image的score
 		ViewScore& neighbor = neighbors.AddEmpty();
 		neighbor.idx.ID = IDB;
 		neighbor.idx.points = score.points;
@@ -646,9 +663,11 @@ bool Scene::SelectNeighborViews(uint32_t ID, IndexArr& points, unsigned nMinView
 /*----------------------------------------------------------------*/
 
 // keep only the best neighbors for the reference image
+// 只保留最佳邻域帧
 bool Scene::FilterNeighborViews(ViewScoreArr& neighbors, float fMinArea, float fMinScale, float fMaxScale, float fMinAngle, float fMaxAngle, unsigned nMaxViews)
 {
 	// remove invalid neighbor views
+	// 移除无效的邻域views
 	RFOREACH(n, neighbors) {
 		const ViewScore& neighbor = neighbors[n];
 		if (neighbor.idx.area < fMinArea ||
@@ -664,6 +683,7 @@ bool Scene::FilterNeighborViews(ViewScoreArr& neighbors, float fMinArea, float f
 
 
 // export all estimated cameras in a MeshLab MLP project as raster layers
+// 参数打印
 bool Scene::ExportCamerasMLP(const String& fileName, const String& fileNameScene) const
 {
 	static const char mlp_header[] =

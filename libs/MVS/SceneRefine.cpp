@@ -361,12 +361,14 @@ MeshRefine::MeshRefine(Scene& _scene, unsigned _nReduceMemory, unsigned _nAltern
 	images(_scene.images)
 {
 	// start worker threads
+	// 启动线程
 	ASSERT(nMaxThreads > 0);
 	ASSERT(threads.IsEmpty());
 	threads.Resize(nMaxThreads);
 	FOREACHPTR(pThread, threads)
 		pThread->start(ThreadWorkerTmp, this);
 	// keep only best neighbor views for each image
+	// 给每个图像只保留一个邻域帧
 	std::unordered_set<uint64_t> mapPairs;
 	mapPairs.reserve(images.GetSize()*nMaxViews);
 	ASSERT(events.IsEmpty());
@@ -380,6 +382,7 @@ MeshRefine::MeshRefine(Scene& _scene, unsigned _nReduceMemory, unsigned _nAltern
 MeshRefine::~MeshRefine()
 {
 	// wait for the working threads to close
+	// 等待线程关闭
 	FOREACH(i, threads)
 		events.AddEvent(new EVTClose());
 	FOREACHPTR(pThread, threads)
@@ -458,6 +461,7 @@ void MeshRefine::ListCameraFaces()
 	}
 
 	// project mesh to each camera plane
+	// 投影mesh到每个相机平面
 	ASSERT(events.IsEmpty());
 	FOREACH(idxImage, images)
 		events.AddEvent(new EVTProjectMesh(idxImage, arrCameraFaces[idxImage]));
@@ -465,7 +469,7 @@ void MeshRefine::ListCameraFaces()
 }
 
 // compute for each face the projection area as the maximum area in both images of a pair
-// 计算face的最大投影面积
+// 计算face的最大投影面积，调用前要保证ListCameraFaces先调用
 // (make sure ListCameraFaces() was called before)
 void MeshRefine::ListFaceAreas(Mesh::AreaArr& maxAreas)
 {
@@ -627,6 +631,12 @@ void MeshRefine::SubdivideMesh(uint32_t maxArea, float fDecimate, unsigned nClos
 // score mesh using photo-consistency
 // and compute vertices gradient using analytical method
 // 计算顶点调整量使得loss更小mesh更准确
+/**
+ * @brief 利用光度一致性（ZNCC）和正则项构建优化目标函数，计算每个顶点的梯度。公式推导见课件
+ * 
+ * @param[out] gradients 每个顶点的梯度
+ * @return double 分数
+ */
 double MeshRefine::ScoreMesh(double* gradients)
 {
 	// extract array of faces viewed by each camera
@@ -1205,7 +1215,13 @@ void MeshRefine::ThProjectMesh(uint32_t idxImage, const CameraFaces& cameraFaces
 	ProjectMesh(vertices, faces, cameraFaces, imageData.camera, view.image.size(),
 				view.depthMap, view.faceMap, view.baryMap);
 }
-// !!!计算光度一致性优化梯度 把计算的公式梳理
+// 
+/**
+ * @brief 计算左右图像的光度一致性用来计算下降梯度 计算的公式推导见课件
+ * 
+ * @param[in] idxImageA 左图像
+ * @param[in] idxImageB 右图像
+ */
 void MeshRefine::ThProcessPair(uint32_t idxImageA, uint32_t idxImageB)
 {
 	// fetch view A data
@@ -1350,8 +1366,10 @@ public:
 
 	bool Evaluate(const double* const parameters, double* cost, double* gradient) const {
 		// update surface parameters
+		// 更新参数
 		ApplyParams(parameters);
 		// evaluate residuals and gradients
+		// 计算梯度
 		Point3dArr gradients;
 		if (!gradient) {
 			gradients.Resize(refine.vertices.GetSize());
@@ -1382,7 +1400,8 @@ protected:
 // optimize mesh using photo-consistency  photometric-consistency
 // fThPlanarVertex - threshold used to remove vertices on planar patches (percentage of the minimum depth, 0 - disable)
 /**
- * @brief mesh优化，主要是采用光度一致性
+ * @brief mesh优化，主要是采用光度一致性。代码用两种方式：一种调用Ceres库一种直接实现最小化优化。两者效果和性能均没有明显区别
+ * 主要参考文献：High Accuracy and Visibility-Consistent Dense Multiview Stereo
  * 
  * @param[in] nResolutionLevel  用来refine的图片分辨率
  * @param[in] nMinResolution    用来refine的图片最小分辨率
@@ -1394,7 +1413,7 @@ protected:
  * @param[in] nScales           控制用几个图像尺度去优化mesh 默认3
  * @param[in] fScaleStep        尺度步长 默认0.5
  * @param[in] nReduceMemory     是否减少内存占用 默认1
- * @param[in] nAlternatePair 
+ * @param[in] nAlternatePair    可选择的图像对
  * @param[in] fRegularityWeight 权重系数
  * @param[in] fRatioRigidityElasticity 
  * @param[in] fThPlanarVertex   平面顶点阈值
@@ -1415,7 +1434,7 @@ bool Scene::RefineMesh(unsigned nResolutionLevel, unsigned nMinResolution, unsig
 	// 多尺度去优化mesh(从低分辨率到高分辨率)
 	for (unsigned nScale=0; nScale<nScales; ++nScale) {
 		// init images
-		// image初始化主要是resize和滤波，假设输入的图像分辨率1280*960，nResolutionLevel为1(2^1)，则用来refine的图像分辨率是640*480 
+		// Step 1 image初始化主要是resize和滤波，假设输入的图像分辨率1280*960，nResolutionLevel为1(2^1)，则用来refine的图像分辨率是640*480 
 		// 多尺度refine对应的scale 0.25 0.5 1 图像分辨率 160*120 320*240 640*480
 		const Real scale(POWI(fScaleStep, (int)(nScales-nScale-1)));
 		const Real step(POWI(2.f, (int)(nScales-nScale))); // 用来计算图像高斯滤波sigma参数
@@ -1424,15 +1443,15 @@ bool Scene::RefineMesh(unsigned nResolutionLevel, unsigned nMinResolution, unsig
 			return false;
 
 		// extract array of triangles incident to each vertex
-		// 提取每个顶点的相关faces即三角face的三个顶点中包含该顶点的所有faces
+		// Step 2提取每个顶点的相关faces即三角face的三个顶点中包含该顶点的所有faces
 		refine.ListVertexFacesPre();
 
 		// automatic mesh subdivision
-		// 网格采样，补洞
+		// Step 3网格采样，补洞
 		refine.SubdivideMesh(nMaxFaceArea, nScale == 0 ? fDecimateMesh : 1.f, nCloseHoles, nEnsureEdgeSize);
 
 		// extract array of triangle normals
-		// 提取每个三角面的法线
+		// Step 4提取每个三角面的法线
 		refine.ListVertexFacesPost();
 
 		#if TD_VERBOSE != TD_VERBOSE_OFF
@@ -1440,14 +1459,17 @@ bool Scene::RefineMesh(unsigned nResolutionLevel, unsigned nMinResolution, unsig
 			mesh.Save(MAKE_PATH(String::FormatString("MeshRefine%u.ply", nScales-nScale-1)));
 		#endif
 
-		// minimize
+		// Step 5 计算最小化每个顶点调整量：两种方法：一种直接使用ceres库进行优化，一种直接实现迭代优化。
 		#ifdef MESHOPT_CERES
+		// Ceres求解优化问题见课件介绍 
 		if (fGradientStep == 0) {
 			// DefineProblem
+			// 定义problem
 			refine.ratioRigidityElasticity = 1.f;
 			ceres::MeshProblem* problemData(new ceres::MeshProblem(refine));
 			ceres::GradientProblem problem(problemData);
 			// SetMinimizerOptions
+			// 设置最小化优化参数
 			ceres::GradientProblemSolver::Options options;
 			if (VERBOSITY_LEVEL > 1) {
 				options.logging_type = ceres::LoggingType::PER_MINIMIZER_ITERATION;
@@ -1456,12 +1478,14 @@ bool Scene::RefineMesh(unsigned nResolutionLevel, unsigned nMinResolution, unsig
 				options.logging_type = ceres::LoggingType::SILENT;
 				options.minimizer_progress_to_stdout = false;
 			}
+			// 设置优化中止条件
 			options.function_tolerance = 1e-3;
 			options.gradient_tolerance = 1e-7;
 			options.max_num_line_search_step_size_iterations = 10;
 			options.callbacks.push_back(problemData);
 			ceres::GradientProblemSolver::Summary summary;
 			// SolveProblem
+			// 求解
 			ceres::Solve(options, problem, problemData->GetParameters(), &summary);
 			DEBUG_ULTIMATE(summary.FullReport().c_str());
 			switch (summary.termination_type) {
@@ -1475,14 +1499,16 @@ bool Scene::RefineMesh(unsigned nResolutionLevel, unsigned nMinResolution, unsig
 				return false;
 			}
 			ASSERT(summary.IsSolutionUsable());
+			// 求解的参数应用到mesh上
 			problemData->ApplyParams();
 		} else
 		#endif // MESHOPT_CERES
 		{
+			// 主要参考文献：High Accuracy and Visibility-Consistent Dense Multiview Stereo
 			// loop a constant number of iterations and apply the gradient
 			// 利用光度一致性优化mesh的顶点坐标，迭代指定次数
-			int iters(75);
-			double gstep(0.4);
+			int iters(75); // 迭代次数
+			double gstep(0.4); // 优化时梯度下降的步长 
 			if (fGradientStep > 1) {
 				iters = FLOOR2INT(fGradientStep);
 				gstep = (fGradientStep-(float)iters)*10;
@@ -1516,16 +1542,18 @@ bool Scene::RefineMesh(unsigned nResolutionLevel, unsigned nMinResolution, unsig
 						Vertex& vert = refine.vertices[v];
 						const Point3d grad(gradients.row(v));
 						vert -= Cast<Vertex::Type>(grad*gstep);
-						const double gn(norm(grad));
+						const double gn(norm(grad)); // 梯度的幅值
 						gv += gn;
 						const float depth(refine.vertexDepth[v]);
 						if (depth < FLT_MAX) {
 							const float th(depth*fThPlanarVertex);
+							// 剔除平面上的点
 							if (!refine.vertexBoundary[v] && (float)gn < th && norm(refine.smoothGrad1[v]) < th)
 								vertexRemove.Insert(v);
 						}
 					}
 					if (!vertexRemove.IsEmpty()) {
+						// 移除要剔除的顶点
 						numVertsRemoved = vertexRemove.GetSize();
 						mesh.Decimate(vertexRemove);
 						refine.ListVertexFacesPost();
@@ -1537,6 +1565,7 @@ bool Scene::RefineMesh(unsigned nResolutionLevel, unsigned nMinResolution, unsig
 					FOREACH(v, refine.vertices) {
 						Vertex& vert = refine.vertices[v];
 						const Point3d grad(gradients.row(v));
+						// 梯度下降，调整量=梯度*乘个步长
 						vert -= Cast<Vertex::Type>(grad*gstep);
 						gv += norm(grad);
 					}

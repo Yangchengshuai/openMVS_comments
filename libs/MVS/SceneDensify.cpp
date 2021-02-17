@@ -1467,6 +1467,7 @@ void DepthMapsData::FuseDepthMaps(PointCloud& pointcloud, bool bEstimateColor, b
 	// 法线计算可选 后续计算不需要
 	if (bEstimateNormal && !pointcloud.points.IsEmpty() && pointcloud.normals.IsEmpty()) {
 		// estimate normal also if requested (quite expensive if normal-maps not available)
+		// 计算法线，如果没有必要就不用计算因为比较费时
 		TD_TIMER_STARTD();
 		pointcloud.normals.Resize(pointcloud.points.GetSize());
 		const int64_t nPoints((int64_t)pointcloud.points.GetSize());
@@ -1487,12 +1488,14 @@ void DepthMapsData::FuseDepthMaps(PointCloud& pointcloud, bool bEstimateColor, b
 			}
 			const DepthData& depthData(arrDepthData[pointcloud.pointViews[i][idxView]]);
 			ASSERT(depthData.IsValid() && !depthData.IsEmpty());
+			// 法线计算
 			depthData.GetNormal(projs[i][idxView].GetCoord(), pointcloud.normals[i]);
 		}
 		DEBUG_EXTRA("Normals estimated for the dense point-cloud: %u normals (%s)", pointcloud.points.GetSize(), TD_TIMER_GET_FMT().c_str());
 	}
 
 	// release all depth-maps
+	// 内存释放，释放所有的depth
 	FOREACHPTR(pDepthData, arrDepthData) {
 		if (pDepthData->IsValid())
 			pDepthData->DecRef();
@@ -1503,7 +1506,7 @@ void DepthMapsData::FuseDepthMaps(PointCloud& pointcloud, bool bEstimateColor, b
 
 
 // S T R U C T S ///////////////////////////////////////////////////
-
+// 法向量计算，启动多线程
 DenseDepthMapData::DenseDepthMapData(Scene& _scene, int _nFusionMode)
 	: scene(_scene), depthMaps(_scene), idxImage(0), sem(1), nFusionMode(_nFusionMode)
 {
@@ -1513,6 +1516,7 @@ DenseDepthMapData::DenseDepthMapData(Scene& _scene, int _nFusionMode)
 			OPTDENSE::nOptimize &= ~OPTDENSE::OPTIMIZE;
 	}
 }
+// 析构 线程释放
 DenseDepthMapData::~DenseDepthMapData()
 {
 	if (nFusionMode < 0)
@@ -1533,7 +1537,14 @@ void DenseDepthMapData::SignalCompleteDepthmapFilter()
 
 static void* DenseReconstructionEstimateTmp(void*);
 static void* DenseReconstructionFilterTmp(void*);
-
+/**
+ * @brief 深度计算
+ * 
+ * @param[in] nFusionMode   控制参数：-1采用SGM/tSGM计算，只输出视差图 -2 计算加融合视差图 0是深度图计算和融合 1采用patchMatch方式 只输出深度图
+ * <0是用SGM计算视差的方式计算深度，>=0用PatchMatch方式计算深度
+ * @return true  计算成功
+ * @return false 深度图计算失败
+ */
 bool Scene::DenseReconstruction(int nFusionMode)
 {
 	DenseDepthMapData data(*this, nFusionMode);
@@ -1585,7 +1596,14 @@ bool Scene::DenseReconstruction(int nFusionMode)
 
 // do first half of dense reconstruction: depth map computation
 // results are saved to "data"
-// 深度图计算patch/sgm,tsgm
+// 
+/**
+ * @brief 深度图计算patch/sgm,tsgm
+ * 
+ * @param[in/out] data 存储深度计算的结果
+ * @return true 
+ * @return false 
+ */
 bool Scene::ComputeDepthMaps(DenseDepthMapData& data)
 {
 	{
@@ -1665,6 +1683,7 @@ bool Scene::ComputeDepthMaps(DenseDepthMapData& data)
 	{
 		TD_TIMER_START();
 		// for each image, find all useful neighbor views
+		// 给每一帧图像找到所有的邻域帧
 		IIndexArr invalidIDs;
 		#ifdef DENSE_USE_OPENMP
 		#pragma omp parallel for shared(data, invalidIDs)
@@ -1739,10 +1758,12 @@ bool Scene::ComputeDepthMaps(DenseDepthMapData& data)
 		FOREACH(i, data.images)
 			data.events.AddEvent(new EVTFilterDepthMap(i));
 		// start working threads
+		// 线程启动
 		data.progress = new Util::Progress("Filtered depth-maps", data.images.GetSize());
 		GET_LOGCONSOLE().Pause();
 		if (nMaxThreads > 1) {
 			// multi-thread execution
+			// 多线程
 			cList<SEACAVE::Thread> threads(MINF(nMaxThreads, (unsigned)data.images.GetSize()));
 			FOREACHPTR(pThread, threads)
 				pThread->start(DenseReconstructionFilterTmp, (void*)&data);
@@ -1750,6 +1771,7 @@ bool Scene::ComputeDepthMaps(DenseDepthMapData& data)
 				pThread->join();
 		} else {
 			// single-thread execution
+			// 单线程
 			DenseReconstructionFilter((void*)&data);
 		}
 		GET_LOGCONSOLE().Play();
@@ -1768,6 +1790,11 @@ void* DenseReconstructionEstimateTmp(void* arg) {
 }
 
 // initialize the dense reconstruction with the sparse point cloud
+/**
+ * @brief 深度图计算的主流程各个环节线程启动，包括depth初始化：主要是通过稀疏点进行插值优化 depth计算 depth优化
+ * 
+ * @param[in/out] pData 输入输出数据，所有深度计算相关数据
+ */
 void Scene::DenseReconstructionEstimate(void* pData)
 {
 	DenseDepthMapData& data = *((DenseDepthMapData*)pData);
@@ -1780,11 +1807,13 @@ void Scene::DenseReconstructionEstimate(void* pData)
 			if (evtImage.idxImage >= data.images.GetSize()) {
 				if (nMaxThreads > 1) {
 					// close working threads
+					// idxImage超过图像总数，说明所有计算已经完成，线程关闭
 					data.events.AddEvent(new EVTClose);
 				}
 				return;
 			}
 			// select views to reconstruct the depth-map for this image
+			// 为当前帧选择邻域帧来计算深度图
 			const IIndex idx = data.images[evtImage.idxImage];
 			DepthData& depthData(data.depthMaps.arrDepthData[idx]);
 			// init images pair: reference image and the best neighbor view
@@ -1792,10 +1821,12 @@ void Scene::DenseReconstructionEstimate(void* pData)
 			//初始化用来计算深度图的图像对，如果最佳邻域为空，则从neighbors中根据score选取不超过nNumViews neighbor views
 			if (!data.depthMaps.InitViews(depthData, data.neighborsMap.IsEmpty()?NO_ID:data.neighborsMap[evtImage.idxImage], OPTDENSE::nNumViews)) {
 				// process next image
+				// 如果当前帧没有找到邻域，则无法计算深度，直接跳过处理下一帧图像
 				data.events.AddEvent(new EVTProcessImage((IIndex)Thread::safeInc(data.idxImage)));
 				break;
 			}
 			// try to load already compute depth-map for this image
+			// 尝试加载当前帧的深度图，如果有就不用再计算，直接进入优化环节
 			if (data.nFusionMode >= 0 && File::access(ComposeDepthFilePath(depthData.GetView().GetID(), "dmap"))) {
 				if (OPTDENSE::nOptimize & OPTDENSE::OPTIMIZE) {
 					if (!depthData.Load(ComposeDepthFilePath(depthData.GetView().GetID(), "dmap"))) {
@@ -1803,12 +1834,15 @@ void Scene::DenseReconstructionEstimate(void* pData)
 						exit(EXIT_FAILURE);
 					}
 					// optimize depth-map
+					// 优化深度图
 					data.events.AddEventFirst(new EVTOptimizeDepthMap(evtImage.idxImage));
 				}
 				// process next image
+				// 如果当前深度不需要优化，则开始处理下一帧图像
 				data.events.AddEvent(new EVTProcessImage((uint32_t)Thread::safeInc(data.idxImage)));
 			} else {
 				// estimate depth-map
+				// 计算深度图
 				data.events.AddEventFirst(new EVTEstimateDepthMap(evtImage.idxImage));
 			}
 			break; }
@@ -1817,8 +1851,10 @@ void Scene::DenseReconstructionEstimate(void* pData)
 		case EVT_ESTIMATEDEPTHMAP: {
 			const EVTEstimateDepthMap& evtImage = *((EVTEstimateDepthMap*)(Event*)evt);
 			// request next image initialization to be performed while computing this depth-map
+			// 计算当前帧深度时，下一帧图像初始化同时在做。
 			data.events.AddEvent(new EVTProcessImage((uint32_t)Thread::safeInc(data.idxImage)));
 			// extract depth map
+			// 提取深度
 			data.sem.Wait();
 			if (data.nFusionMode >= 0) {
 				// extract depth-map using Patch-Match algorithm
@@ -1831,9 +1867,11 @@ void Scene::DenseReconstructionEstimate(void* pData)
 					data.sgm.Match(*this, data.images[evtImage.idxImage], OPTDENSE::nNumViews);
 				} else {
 					// fuse existing disparity-maps
+					// 融合现存的视差图
 					const IIndex idx(data.images[evtImage.idxImage]);
 					DepthData& depthData(data.depthMaps.arrDepthData[idx]);
 					data.sgm.Fuse(*this, data.images[evtImage.idxImage], OPTDENSE::nNumViews, 2, depthData.depthMap, depthData.confMap);
+					// 计算法线，一般用不到为减少内存消耗尽量不算
 					if (OPTDENSE::nEstimateNormals == 2)
 						EstimateNormalMap(depthData.images.front().camera.K, depthData.depthMap, depthData.normalMap);
 					depthData.dMin = ZEROTOLERANCE<float>(); depthData.dMax = FLT_MAX;
@@ -1842,29 +1880,34 @@ void Scene::DenseReconstructionEstimate(void* pData)
 			data.sem.Signal();
 			if (OPTDENSE::nOptimize & OPTDENSE::OPTIMIZE) {
 				// optimize depth-map
+				// 优化深度图
 				data.events.AddEventFirst(new EVTOptimizeDepthMap(evtImage.idxImage));
 			} else {
 				// save depth-map
+				// 保存深度图
 				data.events.AddEventFirst(new EVTSaveDepthMap(evtImage.idxImage));
 			}
 			break; }
 		// Step 3_3 depth 优化 移除小的segment 填充gap	
 		case EVT_OPTIMIZEDEPTHMAP: {
-			const EVTOptimizeDepthMap& evtImage = *((EVTOptimizeDepthMap*)(Event*)evt);
+			const EVTOptimizeDepthMap&  evtImage = *((EVTOptimizeDepthMap*)(Event*)evt);
 			const IIndex idx = data.images[evtImage.idxImage];
 			DepthData& depthData(data.depthMaps.arrDepthData[idx]);
 			#if TD_VERBOSE != TD_VERBOSE_OFF
 			// save depth map as image
+			// 将深度图保存为图像
 			if (g_nVerbosityLevel > 3)
 				ExportDepthMap(ComposeDepthFilePath(depthData.GetView().GetID(), "raw.png"), depthData.depthMap);
 			#endif
 			// apply filters
+			// 滤波，将一些离散的深度值滤波剔除
 			if (OPTDENSE::nOptimize & (OPTDENSE::REMOVE_SPECKLES)) {
 				TD_TIMER_START();
 				if (data.depthMaps.RemoveSmallSegments(depthData)) {
 					DEBUG_ULTIMATE("Depth-map %3u filtered: remove small segments (%s)", depthData.GetView().GetID(), TD_TIMER_GET_FMT().c_str());
 				}
 			}
+			// 滤波，将深度图孔洞填充
 			if (OPTDENSE::nOptimize & (OPTDENSE::FILL_GAPS)) {
 				TD_TIMER_START();
 				if (data.depthMaps.GapInterpolation(depthData)) {
@@ -1872,15 +1915,17 @@ void Scene::DenseReconstructionEstimate(void* pData)
 				}
 			}
 			// save depth-map
+			// 保存深度图
 			data.events.AddEventFirst(new EVTSaveDepthMap(evtImage.idxImage));
 			break; }
-		// Step 3_4 depth 保存
+		// Step 3_4 depth 保存 一般用不到
 		case EVT_SAVEDEPTHMAP: {
 			const EVTSaveDepthMap& evtImage = *((EVTSaveDepthMap*)(Event*)evt);
 			const IIndex idx = data.images[evtImage.idxImage];
 			DepthData& depthData(data.depthMaps.arrDepthData[idx]);
 			#if TD_VERBOSE != TD_VERBOSE_OFF
 			// save depth map as image
+			// 将深度图保存为图像
 			if (g_nVerbosityLevel > 2) {
 				ExportDepthMap(ComposeDepthFilePath(depthData.GetView().GetID(), "png"), depthData.depthMap);
 				ExportConfidenceMap(ComposeDepthFilePath(depthData.GetView().GetID(), "conf.png"), depthData.confMap);
@@ -1892,6 +1937,7 @@ void Scene::DenseReconstructionEstimate(void* pData)
 			}
 			#endif
 			// save compute depth-map for this image
+			// 保存计算的深度图
 			if (!depthData.depthMap.empty())
 				depthData.Save(ComposeDepthFilePath(depthData.GetView().GetID(), "dmap"));
 			depthData.ReleaseImages();
@@ -1932,7 +1978,7 @@ void Scene::DenseReconstructionFilter(void* pData)
 				break;
 			}
 			// make sure all depth-maps are loaded
-			// depth加载
+			// depth加载，确保所有的深度图被加载
 			depthData.IncRef(ComposeDepthFilePath(depthData.GetView().GetID(), "dmap"));
 			const unsigned numMaxNeighbors(8);
 			IIndexArr idxNeighbors(0, depthData.neighbors.GetSize());
@@ -1992,6 +2038,7 @@ void Scene::DenseReconstructionFilter(void* pData)
 			}
 			#endif
 			// save filtered depth-map for this image
+			// 保存滤波的图像
 			depthData.Save(ComposeDepthFilePath(depthData.GetView().GetID(), "dmap"));
 			depthData.DecRef();
 			data.progress->operator++();
@@ -2009,6 +2056,7 @@ void Scene::DenseReconstructionFilter(void* pData)
 /*----------------------------------------------------------------*/
 
 // filter point-cloud based on camera-point visibility intersections
+// 点云滤波，主要是利用可见性进行滤波 一般用不到不再注释
 void Scene::PointCloudFilter(int thRemove)
 {
 	TD_TIMER_STARTD();

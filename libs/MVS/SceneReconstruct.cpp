@@ -428,16 +428,17 @@ void fetchCellFacets(const delaunay_t& Tr, const std::vector<facet_t>& hullFacet
 
 
 // information about an intersection between a segment and a facet
+// 存储分割线和facet相关数据
 struct intersection_t {
 	enum Type {FACET, EDGE, VERTEX};
-	cell_handle_t ncell; // cell neighbor to the last intersected facet
-	vertex_handle_t v1; // vertex for vertex intersection, 1st edge vertex for edge intersection
-	vertex_handle_t v2; // 2nd edge vertex for edge intersection
-	facet_t facet; // intersected facet
-	Type type; // type of intersection (inside facet, on edge, or vertex)
-	REAL dist; // distance from starting point (camera) to this facet
-	bool bigger; // are we advancing away or towards the starting point?
-	const Ray3 ray; // the ray from starting point into the direction of the end point (point -> camera/end-point)
+	cell_handle_t ncell; // 最后一个相交面所在四面体的邻域cell neighbor to the last intersected facet
+	vertex_handle_t v1; // 如果是相交于顶点，v1就是该顶点，如果是相交与边上在v1是边的第一个顶点vertex for vertex intersection, 1st edge vertex for edge intersection
+	vertex_handle_t v2; // 相交于边上时边的第二个顶点2nd edge vertex for edge intersection
+	facet_t facet; // 相交的faceintersected facet
+	Type type; // 相交的类型：点 边 面type of intersection (inside facet, on edge, or vertex)
+	REAL dist; // 从起始点到相交面的距离 distance from starting point (camera) to this facet
+	bool bigger; //判断时远离还是靠近起始点 are we advancing away or towards the starting point?
+	const Ray3 ray; // 起始点到结束点的连线the ray from starting point into the direction of the end point (point -> camera/end-point)
 	inline intersection_t() {}
 	inline intersection_t(const Point3& pt, const Point3& dir) : dist(-FLT_MAX), bigger(true), ray(pt, dir) {}
 };
@@ -446,6 +447,7 @@ struct intersection_t {
 //  coplanar [in,out] : pointer to the 3 int array of indices of the edges coplanar with pq
 // return number of entries in coplanar
 // 查找pq与abc的三个edge中哪个edge/面/顶点相交
+// -1 不相交 0是交于面上 1是交于边上 2 是交于点上
 inline int checkEdges(const point_t& a, const point_t& b, const point_t& c, const point_t& p, const point_t& q, int coplanar[3])
 {
 	int nCoplanar(0);
@@ -469,7 +471,15 @@ inline int checkEdges(const point_t& a, const point_t& b, const point_t& c, cons
 //  coplanar [out] : pointer to the 3 int array of indices of the edges coplanar with (s)
 // return -1 if there is no intersection or
 // the number of edges coplanar with the segment (0 = intersection inside the triangle)
-// 计算线segment面facet相交
+// 
+/**
+ * @brief 判断线segment与面facet是否相交
+ * 
+ * @param[in] t 输入的三角面
+ * @param[in] s 分割线
+ * @param[out] coplanar 
+ * @return int -1 不相交 0 是相交与面 1是相交在边上 2是相交在点上
+ */
 int intersect(const triangle_t& t, const segment_t& s, int coplanar[3])
 {
 	const point_t& a = t.vertex(0);
@@ -735,6 +745,7 @@ edge_cap_t freeSpaceSupport(const delaunay_t& Tr, const std::vector<cell_info_t>
 // Fetch the triangle formed by the facet vertices,
 // making sure the facet orientation is kept (as in CGAL::Triangulation_3::triangle())
 // return the vertex handles of the triangle
+// 从face的顶点中取三角面，保持逆时针顺序不变。其实就是取cell中四个面中取指定面并保持点的顺序。
 struct triangle_vhandles_t {
 	vertex_handle_t verts[3];
 	triangle_vhandles_t() {}
@@ -745,6 +756,7 @@ struct triangle_vhandles_t {
 		{ verts[0] = _v0; verts[1] = _v1; verts[2] = _v2; }
 		#endif
 };
+// i是cell中四个顶点的id,其对应的三角面就是要返回的triangle
 inline triangle_vhandles_t getTriangle(cell_handle_t cell, int i)
 {
 	ASSERT(i >= 0 && i <= 3);
@@ -761,9 +773,11 @@ inline triangle_vhandles_t getTriangle(cell_handle_t cell, int i)
 
 // Compute the angle between the plane containing the given facet and the cell's circumscribed sphere
 // return cosines of the angle
+// 计算tr和facet所在面的夹角
 float computePlaneSphereAngle(const delaunay_t& Tr, const facet_t& facet)
 {
 	// compute facet normal
+	// 计算法向量n=(v1-v0)x(v2-v0) 三角形两个边的叉乘就是法向量
 	if (Tr.is_infinite(facet.first))
 		return 1.f;
 	const triangle_vhandles_t tri(getTriangle(facet.first, facet.second));
@@ -776,6 +790,7 @@ float computePlaneSphereAngle(const delaunay_t& Tr, const facet_t& facet)
 			return 0.5f;
 
 	// compute the co-tangent to the circumscribed sphere in one of the vertices
+	// 计算一个顶点在外接球上的余切
 	#if CGAL_VERSION_NR < 1041101000
 	const Point3f cc(CGAL2MVS<float>(facet.first->circumcenter(Tr.geom_traits())));
 	#else
@@ -797,6 +812,7 @@ float computePlaneSphereAngle(const delaunay_t& Tr, const facet_t& facet)
 		return 0.5f;
 
 	// compute the angle between the two vectors
+	// 计算两个向量的夹角
 	return CLAMP((fn.dot(ct))/SQRT(fnLenSq*ctLenSq), -1.f, 1.f);
 }
 } // namespace DELAUNAY
