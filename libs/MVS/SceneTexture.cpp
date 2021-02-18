@@ -72,6 +72,8 @@ using namespace MVS;
 namespace MVS {
 typedef LBPInference::NodeID NodeID;
 // Potts model as smoothness function
+// 设置平滑cost,如果两个节点标签相同则cost=0,否则为MaxEnergy
+// 目的是让相邻face的标签尽可能一致
 LBPInference::EnergyType STCALL SmoothnessPotts(LBPInference::NodeID, LBPInference::NodeID, LBPInference::LabelID l1, LBPInference::LabelID l2) {
 	return l1 == l2 && l1 != 0 && l2 != 0 ? LBPInference::EnergyType(0) : LBPInference::EnergyType(LBPInference::MaxEnergy);
 }
@@ -859,7 +861,7 @@ bool MeshTexture::FaceOutlierDetection(FaceDataArr& faceDatas, float thOutlier) 
  * 
 // 如果face在该view的投影与大多views中不同，降低view质量或者直接移除。
  * @param[in] fOutlierThreshold     颜色差异阈值，用于face选择投影的view时，剔除与大多view不同的外点view
- * @param[in] fRatioDataSmoothness 
+ * @param[in] fRatioDataSmoothness  平滑比例
  * @return true 
  * @return false 
  */
@@ -879,7 +881,7 @@ bool MeshTexture::FaceViewSelection(float fOutlierThreshold, float fRatioDataSmo
 			return false;
 
 		// create faces graph
-		// 创建faces图
+		// 创建以face为节点的无向图
 		typedef boost::adjacency_list<boost::vecS, boost::vecS, boost::undirectedS> Graph;
 		typedef boost::graph_traits<Graph>::edge_iterator EdgeIter;
 		typedef boost::graph_traits<Graph>::out_edge_iterator EdgeOutIter;
@@ -891,7 +893,7 @@ bool MeshTexture::FaceViewSelection(float fOutlierThreshold, float fRatioDataSmo
 			}
 			Mesh::FaceIdxArr afaces;
 			FOREACH(idxFace, faces) {
-				// 取相邻faces
+				// 取face的三个相邻faces，如果在边界可能只有1个或者2个
 				scene.mesh.GetFaceFaces(idxFace, afaces);
 				ASSERT(ISINSIDE((int)afaces.GetSize(), 1, 4));
 				FOREACHPTR(pIdxFace, afaces) {
@@ -901,6 +903,7 @@ bool MeshTexture::FaceViewSelection(float fOutlierThreshold, float fRatioDataSmo
 						continue;
 					const bool bInvisibleFace(facesDatas[idxFace].IsEmpty());
 					const bool bInvisibleFaceAdj(facesDatas[idxFaceAdj].IsEmpty());
+					// 如果当前face和邻域face都没有可见的view则跳过
 					if (bInvisibleFace || bInvisibleFaceAdj) {
 						if (bInvisibleFace != bInvisibleFaceAdj)
 							seamEdges.AddConstruct(idxFace, idxFaceAdj);
@@ -925,7 +928,7 @@ bool MeshTexture::FaceViewSelection(float fOutlierThreshold, float fRatioDataSmo
 			// map face ID from global to component space
 			// 将face的id从全局转到单个component空间
 			typedef cList<NodeID, NodeID, 0, 128, NodeID> NodeIDs;
-			NodeIDs nodeIDs(faces.GetSize());
+			NodeIDs nodeIDs(faces.GetSize()); // 存储节点在component中的新id
 			NodeIDs sizes(nComponents);// 记录每个face在对应component中的新id
 			sizes.Memset(0);
 			FOREACH(c, components)
@@ -948,10 +951,13 @@ bool MeshTexture::FaceViewSelection(float fOutlierThreshold, float fRatioDataSmo
 			}
 			// 归一化质量
 			const float normQuality(hist.GetApproximatePermille(0.95f));
-			// ??? 暂时没理清
+			// 马尔可夫随机场（概率无向图模型）解决labeling问题，优化方法LBP（loopy belief propagation algorithm）
+			// 每个face都有k个标签，要求解的问题是选择一种标签组合使该方案发生的概率最大可以转化为最小能量求解问题：
+			// 找到一组标签组合使得最终的cost最小 min(E)=Σc(xs)+Σc(xs,xt) xs是所有face（node）,xt是face的邻域
+			// 具体有关马尔可夫介绍见课件
 			#if TEXOPT_INFERENCE == TEXOPT_INFERENCE_LBP
 			// initialize inference structures
-			// 初始化
+			// Step 1 初始化inference,设置邻域和节点
 			CLISTDEFIDX(LBPInference,FIndex) inferences(nComponents);
 			{
 				FOREACH(s, sizes) {
@@ -961,15 +967,19 @@ bool MeshTexture::FaceViewSelection(float fOutlierThreshold, float fRatioDataSmo
 						continue;
 					LBPInference& inference = inferences[s];
 					inference.SetNumNodes(numNodes);
+					// 设置平滑cost,如果两个节点标签相同则cost=0,否则为MaxEnergy
+					// 目的是让相邻face的标签尽可能一致
 					inference.SetSmoothCost(SmoothnessPotts);
 				}
 				EdgeOutIter ei, eie;
 				FOREACH(f, faces) {
 					LBPInference& inference = inferences[components[f]];
+					// 添加edge即每个face的邻域face
 					for (boost::tie(ei, eie) = boost::out_edges(f, graph); ei != eie; ++ei) {
 						ASSERT(f == (FIndex)ei->m_source);
 						const FIndex fAdj((FIndex)ei->m_target);
 						ASSERT(components[f] == components[fAdj]);
+						// 确保每个edge只添加一次
 						if (f < fAdj) // add edges only once
 							inference.SetNeighbors(nodeIDs[f], nodeIDs[fAdj]);
 					}
@@ -977,7 +987,7 @@ bool MeshTexture::FaceViewSelection(float fOutlierThreshold, float fRatioDataSmo
 			}
 
 			// set data costs
-			// 设置node的cost 
+			// Step 2 设置node的每个标签对应的cost 
 			{
 				const LBPInference::EnergyType MaxEnergy(fRatioDataSmoothness*LBPInference::MaxEnergy);
 				// set costs for label 0 (undefined)
@@ -1000,8 +1010,11 @@ bool MeshTexture::FaceViewSelection(float fOutlierThreshold, float fRatioDataSmo
 					const NodeID nodeID(nodeIDs[f]);
 					FOREACHPTR(pFaceData, faceDatas) {
 						const FaceData& faceData = *pFaceData;
+						// 有效标签从1开始，因为0是无标签的标记
 						const Label label((Label)faceData.idxView+1);
+						// 归一化
 						const float normalizedQuality(faceData.quality>=normQuality ? 1.f : faceData.quality/normQuality);
+						// cost计算，质量越好代价越小
 						const float dataCost((1.f-normalizedQuality)*MaxEnergy);
 						inference.SetDataCost(label, nodeID, dataCost);
 					}
@@ -1010,6 +1023,7 @@ bool MeshTexture::FaceViewSelection(float fOutlierThreshold, float fRatioDataSmo
 
 			// assign the optimal view (label) to each face
 			// (label 0 is reserved as undefined)
+			// Step 3 调用能量最小优化函数
 			FOREACH(s, inferences) {
 				LBPInference& inference = inferences[s];
 				if (inference.GetNumNodes() == 0)
@@ -1017,6 +1031,7 @@ bool MeshTexture::FaceViewSelection(float fOutlierThreshold, float fRatioDataSmo
 				inference.Optimize();
 			}
 			// extract resulting labeling
+			// Step 4 提取labeling的结果
 			labels.Memset(0xFF);
 			FOREACH(l, labels) {
 				LBPInference& inference = inferences[components[l]];
@@ -1025,10 +1040,11 @@ bool MeshTexture::FaceViewSelection(float fOutlierThreshold, float fRatioDataSmo
 				const Label label(inference.GetLabel(nodeIDs[l]));
 				ASSERT(label < images.GetSize()+1);
 				if (label > 0)
+				//  注意-1 ，有效是从1开始的
 					labels[l] = label-1;
 			}
 			#endif
-
+			// TRWS与LBP调用类似不再赘述
 			#if TEXOPT_INFERENCE == TEXOPT_INFERENCE_TRWS
 			// initialize inference structures
 			const LabelID numLabels(images.GetSize()+1);
