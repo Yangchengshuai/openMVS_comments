@@ -46,6 +46,7 @@ namespace MVS {
 class MVS_API Scene;
 	
 // structure used to compute all depth-maps
+// 用来计算所有深度的结构体
 class MVS_API DepthMapsData
 {
 public:
@@ -122,17 +123,18 @@ public:
 
 struct MVS_API DenseDepthMapData {
 	Scene& scene;			
-	IIndexArr images; 
-	IIndexArr neighborsMap;//记录每帧对应的参考帧
+	IIndexArr images;                 // 图像信息
+	IIndexArr neighborsMap;           // 记录每帧对应的参考帧
 	DepthMapsData depthMaps;
-	volatile Thread::safe_t idxImage; //当前计算的帧id
-	SEACAVE::EventQueue events; // internal events queue (processed by the working threads)
+	volatile Thread::safe_t idxImage; // 当前计算的帧id
+	SEACAVE::EventQueue events;       // 内部深度计算事件队列 internal events queue (processed by the working threads)
 	Semaphore sem;
 	CAutoPtr<Util::Progress> progress;
-	int nFusionMode;
-	STEREO::SemiGlobalMatcher sgm;// sgm算法
-
+	int nFusionMode;                  // 深度图计算方式控制<0 用SGM/tSGM >=0 用patchMatch
+	STEREO::SemiGlobalMatcher sgm;    // sgm算法
+	// 初始化函数
 	DenseDepthMapData(Scene& _scene, int _nFusionMode=0);
+	// 析构函数
 	~DenseDepthMapData();
 
 	void SignalCompleteDepthmapFilter();

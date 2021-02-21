@@ -859,9 +859,9 @@ bool MeshTexture::FaceOutlierDetection(FaceDataArr& faceDatas, float thOutlier) 
 /**
  * @brief  给每个face（三角网格）分配最佳视图view 
  * 
-// 如果face在该view的投影与大多views中不同，降低view质量或者直接移除。
+ * 如果face在该view的投影与大多views中不同，降低view质量或者直接移除。
  * @param[in] fOutlierThreshold     颜色差异阈值，用于face选择投影的view时，剔除与大多view不同的外点view
- * @param[in] fRatioDataSmoothness  平滑比例
+ * @param[in] fRatioDataSmoothness  控制平滑程度，越大越平滑
  * @return true 
  * @return false 
  */
@@ -2161,7 +2161,7 @@ void MeshTexture::GenerateTexture(bool bGlobalSeamLeveling, bool bLocalSeamLevel
 }
 
 // texture mesh 
-/*
+/**
  * @brief 纹理贴图，首先给每个face（三角网格）选择一个视图（图像），然后生成纹理块（texture patch）。由于不同纹理块来自不同的
  *        图像故光照角度不同，所以不同patch间会有颜色差异，因此需要进行颜色校正：先全局校正整体颜色差异（globel）再局部调整接缝处的颜色差
  *        异(local seam leveling)

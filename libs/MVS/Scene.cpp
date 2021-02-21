@@ -664,6 +664,19 @@ bool Scene::SelectNeighborViews(uint32_t ID, IndexArr& points, unsigned nMinView
 
 // keep only the best neighbors for the reference image
 // 只保留最佳邻域帧
+/**
+ * @brief  邻域帧滤波
+ * 
+ * @param[in] neighbors  待滤波的邻域帧
+ * @param[in] fMinArea   最小面积
+ * @param[in] fMinScale  图像scale滤波最小值
+ * @param[in] fMaxScale  图像scale滤波最大值
+ * @param[in] fMinAngle  滤波最小角度
+ * @param[in] fMaxAngle  滤波最大角度
+ * @param[in] nMaxViews  最大邻域帧个数
+ * @return true 
+ * @return false 
+ */
 bool Scene::FilterNeighborViews(ViewScoreArr& neighbors, float fMinArea, float fMinScale, float fMaxScale, float fMinAngle, float fMaxAngle, unsigned nMaxViews)
 {
 	// remove invalid neighbor views

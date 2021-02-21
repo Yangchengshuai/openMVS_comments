@@ -991,17 +991,24 @@ std::pair<float,float> TriangulatePointsDelaunay(const DepthData::ViewData& imag
 {
 	ASSERT(sizeof(Point3) == sizeof(X3D));
 	ASSERT(sizeof(Point3) == sizeof(CGAL::Point));
+	// 存储深度值的最大最小值
 	std::pair<float,float> depthBounds(FLT_MAX, 0.f);
 	for (uint32_t idx: points) {
+		// 计算点云在相机坐标系下的坐标xyz
 		const Point3f pt(image.camera.ProjectPointP3(pointcloud.points[idx]));
+		// 插入(u,v,d)构建三角网格
 		delaunay.insert(CGAL::Point(pt.x/pt.z, pt.y/pt.z, pt.z));
+		// 计算深度值最大最小值
 		if (depthBounds.first > pt.z)
 			depthBounds.first = pt.z;
 		if (depthBounds.second < pt.z)
 			depthBounds.second = pt.z;
 	}
 	// if full size depth-map requested
-	// 如果稀疏点在图像四个角落没值的话，因为三角化是一个凸包无法覆盖整个图像如果需要整个图像可以添加角点用深度平均值表示
+	// 如果稀疏点在图像四个角落没值，又因为三角化是一个凸包无法覆盖整个图像，所以如果需要整个图像都能初始化深度，则可以添加角点用深度平均值表示
+	// 角点深度的深度值直接取平均值其实是不符合模型的真实深度的，所以进行优化：
+	// 加入四个角点后划分三角网格后，查找距离角点最近的三个面，分别计算在每个面所在所在平面投影到角点的深度值和三角面中心距离
+	// 角点的距离转化为权重（距离角点越近深度应该越接近故权重越大） depth_new=（Σscore*depth）/numPoints
 	if (OPTDENSE::bAddCorners) {
 		typedef TIndexScore<float,float> DepthDist;
 		typedef CLISTDEF0(DepthDist) DepthDistArr;
@@ -1017,27 +1024,38 @@ std::pair<float,float> TriangulatePointsDelaunay(const DepthData::ViewData& imag
 		};
 		// compute average depth from the closest 3 directly connected faces,
 		// weighted by the distance
-		const size_t numPoints = 3;
+		// 计算距离角点最近的三个平面的平均深度，权重是用face像素中心到角点距离来计算
+		const size_t numPoints = 3; // 距离角点最近面的个数
+		// 四个角点逐个处理
 		for (int i=0; i<4; ++i) {
 			const CGAL::VertexHandle vcorner = vcorners[i];
+			// 计算包含该角点的faces
 			CGAL::FaceCirculator cfc(delaunay.incident_faces(vcorner));
 			if (cfc == 0)
+				// 如果没有找到face则跳过直接处理下一个点，正常情况下不够发生
 				continue; // normally this should never happen
 			const CGAL::FaceCirculator done(cfc);
 			Point3d& poszA = reinterpret_cast<Point3d&>(vcorner->point());
+			// 角点的uv坐标
 			const Point2d& posA = reinterpret_cast<const Point2d&>(poszA);
+			// 相机原点出发穿过角点（k*[u,v,1]）所在射线，深度为任意值时均在这条射线上
 			const Ray3d rayA(Point3d::ZERO, normalized(image.camera.TransformPointI2C(poszA)));
-			DepthDistArr depths(0, numPoints);
+			DepthDistArr depths(0, numPoints);// 存储三个面在角点投影的深度
 			do {
+				// 计算邻域face
 				CGAL::FaceHandle fc(cfc->neighbor(cfc->index(vcorner)));
+				// 如果fc是个无限face（一个顶点在无限远处的face）跳过
 				if (fc == delaunay.infinite_face())
 					continue;
+				// 如果邻域face的顶点包含上面四个角点中任意一个也要跳过，因为四个角点都是待优化点不能参与当前角点的优化
 				for (int j=0; j<4; ++j)
 					if (fc->has_vertex(vcorners[j]))
 						goto Continue;
 				// compute the depth as the intersection of the corner ray with
 				// the plane defined by the face's vertices
+				// 计算深度:角点ray与平面的交点（见课件图示）
 				{
+				// 平面三个顶点（相机坐标系下）
 				const Point3d& poszB0 = reinterpret_cast<const Point3d&>(fc->vertex(0)->point());
 				const Point3d& poszB1 = reinterpret_cast<const Point3d&>(fc->vertex(1)->point());
 				const Point3d& poszB2 = reinterpret_cast<const Point3d&>(fc->vertex(2)->point());
@@ -1046,21 +1064,28 @@ std::pair<float,float> TriangulatePointsDelaunay(const DepthData::ViewData& imag
 					image.camera.TransformPointI2C(poszB1),
 					image.camera.TransformPointI2C(poszB2)
 				);
+				// 计算角点ray与平面的交点
 				const Point3d poszB(rayA.Intersects(planeB));
+				// 如果深度小于0 （点在相机背面）相机不可能看到所以不合理
 				if (poszB.z <= 0)
 					continue;
+				// 取face的中心点
 				const Point2d posB((
 					reinterpret_cast<const Point2d&>(poszB0)+
 					reinterpret_cast<const Point2d&>(poszB1)+
 					reinterpret_cast<const Point2d&>(poszB2))/3.f
 				);
+				// 计算角点与face中心点的距离
 				const double dist(norm(posB-posA));
+				// 存储该深度值和距离的逆
 				depths.StoreTop<numPoints>(DepthDist(CLAMP((float)poszB.z,depthBounds.first,depthBounds.second), INVERT((float)dist)));
 				}
 				Continue:;
 			} while (++cfc != done);
+			// 如果得到的近邻深度不够三个也跳过（不可能发生）
 			if (depths.size() != numPoints)
 				continue; // normally this should never happen
+			// 带权重的深度计算：depth_new=（Σscore*depth）/numPoints=Σ（score/numPoints）*depth
 			FloatMap vecDists(&depths[0].score, numPoints);
 			vecDists *= 1.f/vecDists.sum();
 			FloatMap vecDepths(&depths[0].idx, numPoints);
@@ -1099,6 +1124,7 @@ bool MVS::TriangulatePoints2DepthMap(
 	dMax = thDepth.second;
 
 	// create rough depth-map by interpolating inside triangles
+	// 通过在三角网格内插值，计算初始深度值
 	const Camera& camera = image.camera;
 	depthMap.create(image.image.size());
 	normalMap.create(image.image.size());
@@ -1115,6 +1141,7 @@ bool MVS::TriangulatePoints2DepthMap(
 		inline void operator()(const ImageRef& pt) {
 			if (!depthMap.isInside(pt))
 				return;
+			//深度z计算： (n/d)x=1 ,x=depth*k[u,v,1] 则 depth=（n/d）*k[u,v,1]
 			const Depth z(INVERT(normalPlane.dot(P.TransformPointI2C(Point2f(pt)))));
 			if (z <= 0) // due to numerical instability
 				return;
@@ -1129,14 +1156,17 @@ bool MVS::TriangulatePoints2DepthMap(
 		const Point3f i1(reinterpret_cast<const Point3d&>(face.vertex(1)->point()));
 		const Point3f i2(reinterpret_cast<const Point3d&>(face.vertex(2)->point()));
 		// compute the plane defined by the 3 points
+		// 利用三个点计算平面方程
 		const Point3f c0(camera.TransformPointI2C(i0));
 		const Point3f c1(camera.TransformPointI2C(i1));
 		const Point3f c2(camera.TransformPointI2C(i2));
 		const Point3f edge1(c1-c0);
 		const Point3f edge2(c2-c0);
+		// 三角形两个边叉乘得到的向量就是平面法向量（右手定则）
 		data.normal = normalized(edge2.cross(edge1));
 		data.normalPlane = data.normal * INVERT(data.normal.dot(c0));
 		// draw triangle and for each pixel compute depth as the ray intersection with the plane
+		// 将三角面栅格化计算面内的每个像素对应平面上的深度
 		Image8U::RasterizeTriangle(
 			reinterpret_cast<const Point2f&>(i2),
 			reinterpret_cast<const Point2f&>(i1),
@@ -1145,6 +1175,7 @@ bool MVS::TriangulatePoints2DepthMap(
 	return true;
 } // TriangulatePoints2DepthMap
 // same as above, but does not estimate the normal-map
+// 同上，不再赘述
 bool MVS::TriangulatePoints2DepthMap(
 	const DepthData::ViewData& image, const PointCloud& pointcloud, const IndexArr& points,
 	DepthMap& depthMap, Depth& dMin, Depth& dMax)

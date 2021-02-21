@@ -827,10 +827,10 @@ float computePlaneSphereAngle(const delaunay_t& Tr, const facet_t& facet)
  * @brief mesh重建：首先用之前depth计算得到的点云，逐点插入（插入过程中如果待插入点与上一个已插入的点在view中投影足够远）构建四面体。
  *                  计算score四面体构建的每条边，参考论文（Multi-View Reconstruction PreservingWeakly-Supported Surfaces），最后用graphcut提取重建的曲面。
  * @param[in] distInsert           // 插入点的最近距离，待插入点与已插入点距离要不小于这个值，小于则不插入。控制插入点的密度，太密集也会影响后续计算效率。
- * @param[in] bUseFreeSpaceSupport // 
- * @param[in] nItersFixNonManifold 
- * @param[in] kSigma 
- * @param[in] kQual 
+ * @param[in] bUseFreeSpaceSupport // 是否使用 free space support
+ * @param[in] nItersFixNonManifold // 修复mesh的非流形结构的迭代次数
+ * @param[in] kSigma   表示最小可重构对象
+ * @param[in] kQual     
  * @param[in] kb 
  * @param[in] kf 
  * @param[in] kRel 
@@ -1004,7 +1004,7 @@ bool Scene::ReconstructMesh(float distInsert, bool bUseFreeSpaceSupport, unsigne
 			camCell.cell = delaunay.locate(MVS2CGAL(camera.C));
 			ASSERT(camCell.cell != cell_handle_t());
 			// 寻找所有与该相机相关的facet
-			// camCell.cell是infinite（在凸包外面），则需找到image视锥中包含的所有facet
+			// camCell.cell是infinite（在凸包外面），则需找到在凸包上image视锥中包含的所有facet
 			// 如果不是（在凸包内部），只需找到cell的四个facet
 			fetchCellFacets<CGAL::POSITIVE>(delaunay, hullFacets, camCell.cell, imageData, camCell.facets);
 			// link all cells contained by the camera to the source

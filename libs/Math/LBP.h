@@ -149,7 +149,6 @@ public:
 			#pragma omp parallel for
 			#endif
 			// Step 1 计算每个边的end的节点的每个label的最小能量值
-			// ? 能量计算跟节点当前label没有关系，除了这个oldMsgs会有变化，其它都是固定值，如何传播的？
 			for (int_t edgeID = 0; edgeID < (int_t)edges.size(); ++edgeID) {
 				DirectedEdge& edge = edges[edgeID];
 				// 边的方向是id1->id2
@@ -180,7 +179,7 @@ public:
 			#ifdef LBP_USE_OPENMP
 			#pragma omp parallel for
 			#endif
-			// newMsgs的值传给oldMsgs，并减去最小值？？？
+			// newMsgs的值传给oldMsgs，并减去最小值：做归一化，避免避免能量值太大溢出
 			for (int_t edgeID = 0; edgeID < (int_t)edges.size(); ++edgeID) {
 				DirectedEdge& edge = edges[edgeID];
 				edge.newMsgs.swap(edge.oldMsgs);
