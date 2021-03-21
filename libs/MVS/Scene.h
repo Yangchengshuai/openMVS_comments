@@ -110,7 +110,7 @@ public:
 
 	bool ExportCamerasMLP(const String& fileName, const String& fileNameScene) const;
 
-	// Step 1 Dense reconstruction 深度重建
+	// Step 1 Dense reconstruction 稠密重建
 	/**
 	 * @brief depth计算+点云计算的主函数：主要包含depth计算（ComputeDepthMaps，DenseReconstructionEstimate，DenseReconstructionFilter）
 	 * 和点云融合

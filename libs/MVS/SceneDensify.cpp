@@ -147,11 +147,23 @@ DepthMapsData::~DepthMapsData()
 // For each existing edge, the score is defined such that pairing the same two views for any two vertices is discouraged (a constant high penalty is applied for such edges).
 // This primal-dual defined problem, even if NP hard, can be solved by a Belief Propagation like algorithm, obtaining in general a solution close enough to optimality.
 // 为每个image在全局中选择一个最优的target view 保证所选的所有图像对能覆盖整个场景。
-//? MRF graphcut 具体算法还没搞清楚 可以参考这个提到的a Belief Propagation https://www.zhihu.com/question/67167506
+
 // Step 2_2 从reference image 选的有效的邻域views中选取一个最佳邻域用来计算depth
+/**
+ * @brief 每张图像都选出nMaxViews个邻域帧，我们现在需要给每张图像选择一个最佳邻域来求解深度图这个就是马尔科夫随机场的labeling问题（能量优化）。
+ *        首先构建无向图，每个节点(node)就是view，edge就是两个view连线，对每个view（node）它的标签label就是邻域views。
+ *        node的cost（unary cost）就是之前计算的score，用平均score归一化后的值；
+ *        edge的cost(pairwise cost)的定义是不鼓励两个view（node）的邻域(label)是一样的（若一样会给一个大的cost惩罚这种情况）,原因是我们希望选择的邻域覆盖整个场景。
+ * @param[in] images    所有图像
+ * @param[in] imagesMap 图像在用来计算深度的所有图像中的id与在所有图像中的id的对应map
+ * @param[in] neighborsMap 每帧的n个邻域
+ * @return true 
+ * @return false 
+ */
 bool DepthMapsData::SelectViews(IIndexArr& images, IIndexArr& imagesMap, IIndexArr& neighborsMap)
 {
 	// find all pair of images valid for dense reconstruction
+	// 查找所有用来稠密重建的有效的图像对
 	typedef std::unordered_map<uint64_t,float> PairAreaMap;
 	PairAreaMap edges;
 	double totScore(0);
@@ -162,30 +174,39 @@ bool DepthMapsData::SelectViews(IIndexArr& images, IIndexArr& imagesMap, IIndexA
 		const ViewScoreArr& neighbors(arrDepthData[idx].neighbors);
 		ASSERT(neighbors.GetSize() <= OPTDENSE::nMaxViews);
 		// register edges
+		// 每个帧与它的n个邻域可以组成n个edge，并记录这两个帧的共视点覆盖的图像面积area。
 		FOREACHPTR(pNeighbor, neighbors) {
 			const IIndex idx2(pNeighbor->idx.ID);
 			ASSERT(imagesMap[idx2] != NO_ID);
 			edges[MakePairIdx(idx,idx2)] = pNeighbor->idx.area;
+			// 记录所有score的和和个数，方便后续计算平均值
 			totScore += pNeighbor->score;
 			++numScores;
 		}
 	}
+	// 如果edge为空，返回失败。（一般不会发生）
 	if (edges.empty())
 		return false;
+	// 计算平均值avgScore
 	const float avgScore((float)(totScore/(double)numScores));
 
 	// run global optimization
+	// 运行全局优化，能量最小优化=min(datacost+smoothcost)
 	const float fPairwiseMul = OPTDENSE::fPairwiseMul; // default 0.3
-	const float fEmptyUnaryMult = 6.f;
-	const float fEmptyPairwise = 8.f*OPTDENSE::fPairwiseMul;
-	const float fSamePairwise = 24.f*OPTDENSE::fPairwiseMul;
-	const IIndex _num_labels = OPTDENSE::nMaxViews+1; // N neighbors and an empty state
-	const IIndex _num_nodes = images.GetSize();
-	typedef MRFEnergy<TypeGeneral> MRFEnergyType;
+	const float fEmptyUnaryMult = 6.f; // 空标签cost的系数
+	const float fEmptyPairwise = 8.f*OPTDENSE::fPairwiseMul; // edge上两个节点的标签是空的cost系数
+	const float fSamePairwise = 24.f*OPTDENSE::fPairwiseMul; // edge上两个节点的标签是相同的cost系数，越大越平滑
+	const IIndex _num_labels = OPTDENSE::nMaxViews+1; // n个邻域和一个空的状态即空标签N neighbors and an empty state
+	const IIndex _num_nodes = images.GetSize(); // 节点个数就是图像个数
+	typedef MRFEnergy<TypeGeneral> MRFEnergyType;// 马尔科夫随机场能量优化
+	// MRF初始化
 	CAutoPtr<MRFEnergyType> energy(new MRFEnergyType(TypeGeneral::GlobalSize()));
+	// 节点初始化
 	CAutoPtrArr<MRFEnergyType::NodeId> nodes(new MRFEnergyType::NodeId[_num_nodes]);
 	typedef SEACAVE::cList<TypeGeneral::REAL, const TypeGeneral::REAL&, 0> EnergyCostArr;
 	// unary costs: inverse proportional to the image pair score
+	// 一元代价（每个节点的代价）：avgScore/score 。view选当前标签（score越大该邻域越合适）的代价，avgScore/score就越小即代价越小则该邻域就越合适
+	// 节点和对应的cost计算
 	EnergyCostArr arrUnary(_num_labels);
 	for (IIndex n=0; n<_num_nodes; ++n) {
 		const ViewScoreArr& neighbors(arrDepthData[images[n]].neighbors);
@@ -195,7 +216,10 @@ bool DepthMapsData::SelectViews(IIndexArr& images, IIndexArr& imagesMap, IIndexA
 		nodes[n] = energy->AddNode(TypeGeneral::LocalSize(neighbors.GetSize()+1), TypeGeneral::NodeData(arrUnary.Begin()));
 	}
 	// pairwise costs: as ratios between the area to be covered and the area actually covered
-	EnergyCostArr arrPairwise(_num_labels*_num_labels);
+	// 成对代价（edge代价）：要覆盖的面积和实际覆盖的面积之间的比率 ,其实就是节点选对应标签的面积越大代价越小，如果标签一致则设比较大的代价
+	// edge上两个节点在对应标签下的areai,areaj，取当前edge的area，如果两标签不一致cost=area/areai + area/areaj 
+	// 如果一致，cost=fSamePairwise
+	EnergyCostArr arrPairwise(_num_labels*_num_labels);// edge的两个节点，每个节点有n个label，故有n*n个组合
 	for (PairAreaMap::const_reference edge: edges) {
 		const PairIdx pair(edge.first);
 		const float area(edge.second);
@@ -208,28 +232,37 @@ bool DepthMapsData::SelectViews(IIndexArr& images, IIndexArr& imagesMap, IIndexA
 			FOREACHPTR(pNi, neighborsI) {
 				const IIndex j(pNi->idx.ID);
 				const float areaI(area/pNi->idx.area);
+				//如果两标签不一致cost=area/areai + area/areaj ，如果一致，cost=fSamePairwise
 				arrPairwise.Insert(pair.i == i && pair.j == j ? fSamePairwise : fPairwiseMul*(areaI+areaJ));
 			}
+			// 插入edge的start节点标签为空标签的cost
 			arrPairwise.Insert(fEmptyPairwise+fPairwiseMul*areaJ);
 		}
+		// 插入edge的end节点的标签为空标签的cost
 		for (const ViewScore& Ni: neighborsI) {
 			const float areaI(area/Ni.idx.area);
 			arrPairwise.Insert(fPairwiseMul*areaI+fEmptyPairwise);
 		}
+		// 插入edge两个节点的标签均为空的cost
 		arrPairwise.Insert(fEmptyPairwise*2);
 		const IIndex nodeI(imagesMap[pair.i]);
 		const IIndex nodeJ(imagesMap[pair.j]);
+		// 添加边和cost
 		energy->AddEdge(nodes[nodeI], nodes[nodeJ], TypeGeneral::EdgeData(TypeGeneral::GENERAL, arrPairwise.Begin()));
 	}
 
 	// minimize energy
+	// 能量最小化求解每个节点的最佳label方案
 	MRFEnergyType::Options options;
 	options.m_eps = OPTDENSE::fOptimizerEps;
 	options.m_iterMax = OPTDENSE::nOptimizerMaxIters;
 	#ifndef _RELEASE
+	// 打印参数设置
 	options.m_printIter = 1;
 	options.m_printMinIter = 1;
 	#endif
+	// 求解方法TRW_S （Tree-reweighted Message Passing ）或者BP（Belief Propagation）
+	// 论文：convergent tree-reweighted message passing for energy minimization
 	#if 1
 	TypeGeneral::REAL energyVal, lowerBound;
 	energy->Minimize_TRW_S(options, lowerBound, energyVal);
@@ -255,10 +288,11 @@ bool DepthMapsData::SelectViews(IIndexArr& images, IIndexArr& imagesMap, IIndexA
 	}
 
 	// remove all images with no valid neighbors
-	//如果有帧的最佳邻域是无效（NO_ID）则从用来计算depth的image中移除。
+	// 如果有帧的最佳邻域是无效（NO_ID）则从用来计算depth的image中移除。
 	RFOREACH(i, neighborsMap) {
 		if (neighborsMap[i] == NO_ID) {
 			// remove image with no neighbors
+			// 移除没有邻域的image
 			for (IIndex& imageMap: imagesMap)
 				if (imageMap != NO_ID && imageMap > i)
 					--imageMap;
@@ -287,6 +321,7 @@ bool DepthMapsData::SelectViews(DepthData& depthData)
 	depthData.neighbors.CopyOf(scene.images[idxImage].neighbors);
 
 	// remove invalid neighbor views
+	// 移除无效的邻域帧
 	const float fMinArea(OPTDENSE::fMinArea);
 	const float fMinScale(0.2f), fMaxScale(3.2f);
 	const float fMinAngle(FD2R(OPTDENSE::fMinAngle));
@@ -323,7 +358,7 @@ bool DepthMapsData::InitViews(DepthData& depthData, IIndex idxNeighbor, IIndex n
 	ASSERT(depthData.images.IsEmpty());
 
 	// set this image the first image in the array
-	//images中第一帧是reference image，之后的是邻域帧
+	// images中第一帧是reference image，之后的是邻域帧
 	depthData.images.Reserve(depthData.neighbors.GetSize()+1);
 	depthData.images.AddEmpty();
 
@@ -374,6 +409,7 @@ bool DepthMapsData::InitViews(DepthData& depthData, IIndex idxNeighbor, IIndex n
 	}
 
 	// init the first image as well
+	// 初始化第一帧
 	DepthData::ViewData& imageRef = depthData.images.First();
 	imageRef.scale = 1;
 	imageRef.pImageData = &scene.images[idxImage];
@@ -398,6 +434,7 @@ bool DepthMapsData::InitDepthMap(DepthData& depthData)
 
 	#if TD_VERBOSE != TD_VERBOSE_OFF
 	// save rough depth map as image
+	// 保存深度图
 	if (g_nVerbosityLevel > 4) {
 		ExportDepthMap(ComposeDepthFilePath(image.GetID(), "init.png"), depthData.depthMap);
 		ExportNormalMap(ComposeDepthFilePath(image.GetID(), "init.normal.png"), depthData.normalMap);
@@ -1551,7 +1588,7 @@ bool Scene::DenseReconstruction(int nFusionMode)
 
 	// estimate depth-maps
 	// depth map fusion mode (-2 - fuse disparity-maps, -1 - export disparity-maps only, 0 - depth-maps & fusion, 1 - export depth-maps only)
-	// 深度图计算两种方式：patchMatch nFusionMode=1；SGM/tSGM nFusionMode=-1 通过nFusionMode控制可以通过这个参数设置对
+	// Step 1 深度图计算两种方式：patchMatch nFusionMode=1；SGM/tSGM nFusionMode=-1 通过nFusionMode控制可以通过这个参数设置对
 	// 这两种算法进行效果性能对比
 	if (!ComputeDepthMaps(data))
 		return false;
@@ -1559,7 +1596,7 @@ bool Scene::DenseReconstruction(int nFusionMode)
 		return true;
 
 	// fuse all depth-maps
-	// 将所有depth融合为一个带views信息的点云。每个点记录所有能看到的view的ID信息
+	// Step 2 将所有depth融合为一个带views信息的点云。每个点记录所有能看到的view的ID信息
 	pointcloud.Release();
 	data.depthMaps.FuseDepthMaps(pointcloud, OPTDENSE::nEstimateColors == 2, OPTDENSE::nEstimateNormals == 2);
 	#if TD_VERBOSE != TD_VERBOSE_OFF
@@ -1583,7 +1620,7 @@ bool Scene::DenseReconstruction(int nFusionMode)
 		VERBOSE("Dense point-cloud composed of:\n\t%u points with 1- views\n\t%u points with 2 views\n\t%u points with 3+ views", nPoints1m, nPoints2, nPoints3p);
 	}
 	#endif
-
+	// Step 3 点云颜色和法线计算（不建议，耗时）
 	if (!pointcloud.IsEmpty()) {
 		if (pointcloud.colors.IsEmpty() && OPTDENSE::nEstimateColors == 1)
 			EstimatePointColors(images, pointcloud);
@@ -1723,7 +1760,7 @@ bool Scene::ComputeDepthMaps(DenseDepthMapData& data)
 
 	// initialize the queue of images to be processed
 	// Step 3 深度计算，分多线程和单线程，主要是通过事件队列实现整个 working 流程。
-	//? 事件队列，多线程
+	// 事件队列，多线程
 	data.idxImage = 0;
 	ASSERT(data.events.IsEmpty());
 	data.events.AddEvent(new EVTProcessImage(0));
@@ -1732,7 +1769,7 @@ bool Scene::ComputeDepthMaps(DenseDepthMapData& data)
 	GET_LOGCONSOLE().Pause();
 	if (nMaxThreads > 1) {
 		// multi-thread execution
-		// 注意depth计算只用两个线程
+		//? 为什么depth计算只用两个线程
 		//? 可能是因为当前帧计算的depth需要传播给邻域帧做初始化帧之间是有关联性的。
 		cList<SEACAVE::Thread> threads(2);
 		FOREACHPTR(pThread, threads)

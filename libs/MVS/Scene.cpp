@@ -519,8 +519,9 @@ inline float Footprint(const Camera& camera, const Point3f& X) {
 // (inspired by: "Multi-View Stereo for Community Photo Collections", Goesele, 2007)
 // 邻域帧选择 
 /**
- * @brief 邻域帧选择
- * 
+ * @brief 邻域帧选择，主要是依据三个条件：共视点f在两个图像(V,R)的夹角(fV与fR组成的夹角)；邻域帧R与当前帧V的分辨率是否接近；
+ *        共视点在图像中覆盖的面积area ，利用这三个条件我们给每一个候选者计算了一个score，分数越大越适合做邻域
+ *		  思考：为什么选择这三个条件？？？见课件
  * @param[in] ID                  当前帧id，计算其邻域帧
  * @param[in] points              当前帧看到的所有三维稀疏点
  * @param[in] nMinViews           最小邻域 如果帧邻域小于该值认为没有足够邻域无法深度图计算
@@ -578,6 +579,9 @@ bool Scene::SelectNeighborViews(uint32_t ID, IndexArr& points, unsigned nMinView
 			const Point3f V2(imageData2.camera.C - Cast<REAL>(point));
 			// 共视点与左右相机中心的连线的夹角
 			const float fAngle(ACOS(ComputeAngle<float,float>(V1.ptr(), V2.ptr())));
+			// 选择1.2次方（论文中是2），2次方目的是为增强角度下降带来的影响
+			//? 为什么角度这个参数公式中并没有对角度远大于10做限制？
+			// 原因是特征点计算时已经对大角度处理过了，角度比较大时是没有共视特征点的
 			const float wAngle(MINF(POW(fAngle/fOptimAngle, 1.5f), 1.f));
 			const float footprint2(Footprint(imageData2.camera, point));
 			// 视差与深度的关系 depth=fb/dis  dis=fb/depth  fScaleRatio即为视差之比也可以代表两个图像的尺度关系
@@ -613,7 +617,7 @@ bool Scene::SelectNeighborViews(uint32_t ID, IndexArr& points, unsigned nMinView
 			continue;
 		ASSERT(ID != IDB);
 		// compute how well the matched features are spread out (image covered area)
-		// 计算匹配的特征点覆盖的面积
+		// 计算匹配的特征点在两个图像中覆盖的像素面积，取最小面积参与score参数计算
 		const Point2f boundsA(imageData.GetSize());
 		const Point2f boundsB(imageDataB.GetSize());
 		ASSERT(projs.IsEmpty());

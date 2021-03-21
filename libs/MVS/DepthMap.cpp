@@ -569,8 +569,8 @@ void DepthEstimator::ProcessPixel(IDX idx)
 	// compute pixel coordinates from pixel index and its neighbors
 	ASSERT(dir == LT2RB || dir == RB2LT);
 	//!!! FillPixelPatch不应该再调用，对效果不会有影响但是重复计算耗时。该函数是准备reference image的每个像素patch的,只需要计算一次。在ScoreDepthMapTmp中做初始化已经调用过。
-	//if (!PreparePixelPatch(dir == LT2RB ? coords[idx] : coords[coords.GetSize()-1-idx]) || !FillPixelPatch())
-	if (!PreparePixelPatch(dir == LT2RB ? coords[idx] : coords[coords.GetSize()-1-idx]))
+	if (!PreparePixelPatch(dir == LT2RB ? coords[idx] : coords[coords.GetSize()-1-idx]) || !FillPixelPatch())
+	//if (!PreparePixelPatch(dir == LT2RB ? coords[idx] : coords[coords.GetSize()-1-idx]))
 		return;
 	// find neighbors
 	neighbors.Empty();

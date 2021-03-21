@@ -503,6 +503,17 @@ public:
 // - subpixelSteps represents how much sub-pixel accuracy is searched/stored;
 //   if 1 no sub-pixel precision, if for example 4 a 0.25 sub-pixel accuracy is stored;
 //   the stored value is quantized and represented as integer: val=(float)valStored/subpixelSteps
+/**
+ * @brief SGM 具体实现的结构体,代价聚合公式参考课件讲解内容
+ * 
+ * @param[in] _subpixelMode  是否用亚像素
+ * @param[in] _subpixelSteps 亚像素的精度
+ * @param[in] _P1 代价聚合时，如果与邻域像素的视差相差一个像素，给的一个小的惩罚值
+ * @param[in] P2  代价聚合时，如果相差大于一个像素的给的一个大的惩罚值
+ * @param[in] P2alpha  对大的惩罚值p2进行调整时的参数，_P2=（P2*(1+alpha*e^(-DI^2/(2*beta^2)))）时，与图像灰度差相关的参数
+ * @param[in] P2beta   同上
+ * _P2>_P1(较小的惩罚项可以让算法能够适应视差变化小的情形，如倾斜的平面或者连续的曲面，较大的惩罚项可以让算法正确处理视差非连续情况)
+ */
 SemiGlobalMatcher::SemiGlobalMatcher(SgmSubpixelMode _subpixelMode, Disparity _subpixelSteps, AccumCost _P1, AccumCost P2, float P2alpha, float P2beta)
 	:
 	subpixelMode(_subpixelMode),
@@ -918,7 +929,7 @@ void SemiGlobalMatcher::Match(const ViewData& leftImage, const ViewData& rightIm
 		if (!pixel.range.isValid())
 			return;
 		#if SGM_SIMILARITY == SGM_SIMILARITY_CENSUS
-		//census 汉明距离
+		//census 汉明距离：两个比特串对应位不相同的个数
 		struct Compute {
 			static inline int HammingDistance(uint64_t c1, uint64_t c2) {
 				return PopCnt(c1 ^ c2);
@@ -1503,7 +1514,8 @@ SemiGlobalMatcher::Index SemiGlobalMatcher::Disparity2RangeMap(const DisparityMa
 // Check for consistency between a left-to-right and right-to-left pair of stereo results;
 // the results are expected to be opposite in sign but equal in magnitude;
 // the valid disparities are returned in the left map
-// 一致性检查：主要是判断左右的视差是否相同
+// 视差的唯一性约束，一致性检查：主要是判断左右的视差是否相同，剔除错误的视差
+// 通过左的视差图，找到每个像素在右影像的同名点像素及该像素对应的视差值，这两个视差值之间的差值若小于一定阈值（一般为1个像素），则满足唯一性约束被保留，反之则不满足唯一性约束而被剔除
 void SemiGlobalMatcher::ConsistencyCrossCheck(DisparityMap& l2r, const DisparityMap& r2l, Disparity thCross)
 {
 	ASSERT(thCross >= 0);
@@ -1515,13 +1527,16 @@ void SemiGlobalMatcher::ConsistencyCrossCheck(DisparityMap& l2r, const Disparity
 		if (ld == NO_DISP)
 			return;
 		// compute the corresponding disparity pixel according to the disparity value
+		// 根据视差值计算对应的像素坐标
 		const ImageRef v(c+ld,r);
 		// check image bounds
+		// 确认是否超出图像边界
 		if (v.x < 0 || v.x >= r2l.width()) {
 			ld = NO_DISP;
 			return;
 		}
 		// check right disparity is valid
+		// 确认右视差是否有效
 		const Disparity rd = r2l(v);
 		if (r2l(v) == NO_DISP) {
 			ld = NO_DISP;
