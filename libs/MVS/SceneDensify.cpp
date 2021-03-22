@@ -987,7 +987,7 @@ bool DepthMapsData::GapInterpolation(DepthData& depthData)
 			count = 0;
 		}
 	}
-	return true;gonng
+	return true;
 } // GapInterpolation
 /*----------------------------------------------------------------*/
 
