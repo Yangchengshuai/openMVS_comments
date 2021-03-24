@@ -512,7 +512,7 @@ bool MeshTexture::ListCameraFaces(FaceDataViewArr& facesDatas, float fOutlierThr
 	};
 	// 构建octree数据结构
 	typedef TOctree<Mesh::VertexArr,float,3> Octree;
-	const Octree 7octree(vertices);
+	const Octree octree(vertices);
 	#if 0 && !defined(_RELEASE)
 	Octree::DEBUGINFO_TYPE info;
 	octree.GetDebugInfo(&info);
