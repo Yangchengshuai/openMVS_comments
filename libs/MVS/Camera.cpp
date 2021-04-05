@@ -171,6 +171,7 @@ void MVS::DecomposeProjectionMatrix(const PMatrix& P, RMatrix& R, CMatrix& C)
 /*----------------------------------------------------------------*/
 
 // assemble projection matrix: P=KR[I|-C]
+// 计算投影矩阵世界坐标系下的点Pw投影到图像上的投影矩阵
 void MVS::AssembleProjectionMatrix(const KMatrix& K, const RMatrix& R, const CMatrix& C, PMatrix& P)
 {
 	// compute temporary matrices

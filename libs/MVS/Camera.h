@@ -44,20 +44,24 @@
 namespace MVS {
 
 // a camera is represented as:
-//   P = KR[I|-C]
+// 投影矩阵  P = KR[I|-C]
 // where R and C represent the camera orientation and position relative to the world coordinate system;
-// R is expressed as the rotation from world to camera coordinates
+// R is expressed as the rotation from world to camera coordinates 
 // C is expressed as the explicit camera center in world coordinates
 // (as opposite to standard form t which is negated and has the rotation of the camera already applied P = K[R|t]);
 // the world and camera coordinates system is right handed,
 // with x pointing right, y pointing down, and z pointing forward
+// 右手坐标系：x轴朝右，y轴朝下，z轴指向前方
 // (see: R. Hartley, "Multiple View Geometry," 2004, pp. 156.)
+// !!! 注意 C指点是相机中心在世界坐标系中的坐标，而非我们常用的平移向量。我们常用的坐标转换（世界到相机）：p_c=R*p_w+t
+// !!! t是平移向量。相机中心p_c=[0,0,0],根据上述公式推出其在世界坐标系中的坐标p_w=-R_invert*t。这个值就是我们的C
+// !!! 将C=-R_invert*t代入P = KR[I|-C]，p_c=R(p_w-(-R_invert*t))=Rp_w+t  p=k*p_c
 class MVS_API CameraIntern
 {
 public:
-	KMatrix K; // the intrinsic camera parameters (3x3)
-	RMatrix R; // rotation (3x3) and
-	CMatrix C; // translation (3,1), the extrinsic camera parameters
+	KMatrix K; // 内参矩阵the intrinsic camera parameters (3x3)
+	RMatrix R; // 旋转矩阵rotation (3x3) and
+	CMatrix C; // 相机中心在世界坐标系中的位置translation (3,1), the extrinsic camera parameters
 
 public:
 	inline CameraIntern() {}
@@ -68,23 +72,30 @@ public:
 	inline CMatrix GetT() const { return R*(-C); }
 
 	// returns the camera's view forward direction
+	// 相机主光轴
 	inline Point3 Direction() const { return R.row(2); /* equivalent to R.t() * Vec(0,0,1) */ }
 	// returns the camera's view up direction
+	// 相机朝上的方向
 	inline Point3 UpDirection() const { return -R.row(1); /* equivalent to R.t() * Vec(0,-1,0) */ }
 
 	// returns the focal length
+	// 返回焦距
 	inline REAL GetFocalLength() const { return K(0,0); }
 	// returns the focal length aspect ratio
+	// 返回焦距长宽比
 	inline REAL GetFocalLengthRatio() const { return (K(1,1) / K(0,0)); }
 
 	// returns the principal-point
+	// 返回主点坐标
 	inline Point2 GetPrincipalPoint() const { return Point2(K(0,2), K(1,2)); }
 
 	// update camera parameters given the delta
+	// 更新参数
 	inline void UpdateTranslation(const Point3& delta) {
 		C += delta;
 	}
 	// update the camera rotation with the given delta (axis-angle)
+	// 用给定的增量更新摄像机旋转
 	inline void UpdateRotation(const Point3& delta) {
 		R.Apply((const Vec3&)delta);
 	}
@@ -102,6 +113,7 @@ public:
 	}
 
 	// returns the scale used to normalize the intrinsics
+	// 归一化相机内参
 	static inline float GetNormalizationScale(uint32_t width, uint32_t height) {
 		ASSERT(width>0 && height>0);
 		return float(MAXF(width, height));

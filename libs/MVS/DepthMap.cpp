@@ -1040,7 +1040,7 @@ std::pair<float,float> TriangulatePointsDelaunay(const DepthData::ViewData& imag
 			const Point2d& posA = reinterpret_cast<const Point2d&>(poszA);
 			// 相机原点出发穿过角点（k*[u,v,1]）所在射线，深度为任意值时均在这条射线上
 			const Ray3d rayA(Point3d::ZERO, normalized(image.camera.TransformPointI2C(poszA)));
-			DepthDistArr depths(0, numPoints);// 存储三个面在角点投影的深度
+			DepthDistArr depths(0, numPoints);// 存储角点在三个面上投影的深度
 			do {
 				// 计算邻域face
 				CGAL::FaceHandle fc(cfc->neighbor(cfc->index(vcorner)));

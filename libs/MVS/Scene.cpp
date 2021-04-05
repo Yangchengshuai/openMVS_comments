@@ -505,10 +505,12 @@ bool Scene::Save(const String& fileName, ARCHIVE_TYPE type) const
 // f/d
 inline float Footprint(const Camera& camera, const Point3f& X) {
 	#if 0
+	// 跟论文中提到的计算方式一致，就是在当前点基础上移动一个距离，判断下在像素上移动多少个像素（空间中实际距离对于像素距离）
 	const REAL fSphereRadius(1);
 	const Point3 cX(camera.TransformPointW2C(Cast<REAL>(X)));
 	return (float)norm(camera.TransformPointC2I(Point3(cX.x+fSphereRadius,cX.y,cX.z))-camera.TransformPointC2I(cX))+std::numeric_limits<float>::epsilon();
 	#else
+	// 简化计算直接用类似视差dis=fb/depth表示（近大远小）
 	return (float)(camera.GetFocalLength()/camera.PointDepth(X));
 	#endif
 }
@@ -525,7 +527,7 @@ inline float Footprint(const Camera& camera, const Point3f& X) {
  * @param[in] ID                  当前帧id，计算其邻域帧
  * @param[in] points              当前帧看到的所有三维稀疏点
  * @param[in] nMinViews           最小邻域 如果帧邻域小于该值认为没有足够邻域无法深度图计算
- * @param[in] nMinPointViews      用来判断有效点，如果能看大3d点的view大于该阈值则保存
+ * @param[in] nMinPointViews      用来判断有效点，如果能看该3d点的views大于该阈值则保存用于面积计算
  * @param[in] fOptimAngle         角度阈值，越接近该值邻域帧越适合当前帧默认10°
  * @return true 
  * @return false 
@@ -579,7 +581,7 @@ bool Scene::SelectNeighborViews(uint32_t ID, IndexArr& points, unsigned nMinView
 			const Point3f V2(imageData2.camera.C - Cast<REAL>(point));
 			// 共视点与左右相机中心的连线的夹角
 			const float fAngle(ACOS(ComputeAngle<float,float>(V1.ptr(), V2.ptr())));
-			// 选择1.2次方（论文中是2），2次方目的是为增强角度下降带来的影响
+			// wangle=min((alfa/thresh)^1.5,1)选择1.2次方（论文中是2），2次方目的是为增强角度下降带来的影响
 			//? 为什么角度这个参数公式中并没有对角度远大于10做限制？
 			// 原因是特征点计算时已经对大角度处理过了，角度比较大时是没有共视特征点的
 			const float wAngle(MINF(POW(fAngle/fOptimAngle, 1.5f), 1.f));
@@ -628,14 +630,18 @@ bool Scene::SelectNeighborViews(uint32_t ID, IndexArr& points, unsigned nMinView
 			if (views.FindFirst(IDB) == PointCloud::ViewArr::NO_INDEX)
 				continue;
 			const PointCloud::Point& point = pointcloud.points[idx];
+			// 投影到当前帧，并将投影的像素坐标存储在projs中
 			Point2f& ptA = projs.AddConstruct(imageData.camera.ProjectPointP(point));
+			// 投影到邻域帧，用来后面判断是否在图像内
 			Point2f ptB = imageDataB.camera.ProjectPointP(point);
+			// 如果投影点超出当前帧或邻域帧，则该点不是这两帧共视点，从projs中剔除
 			if (!imageData.camera.IsInside(ptA, boundsA) || !imageDataB.camera.IsInside(ptB, boundsB))
 				projs.RemoveLast();
 		}
 		ASSERT(projs.GetSize() <= score.points);
 		if (projs.IsEmpty())
 			continue;
+		// 根据上面计算的投影点坐标计算这些投影点覆盖的面积
 		const float area(ComputeCoveredArea<float,2,16,false>((const float*)projs.Begin(), projs.GetSize(), boundsA.ptr()));
 		projs.Empty();
 		// store image score
@@ -648,6 +654,7 @@ bool Scene::SelectNeighborViews(uint32_t ID, IndexArr& points, unsigned nMinView
 		neighbor.idx.area = area;
 		neighbor.score = score.score*area;
 	}
+	// 根据score的大小进行排序
 	neighbors.Sort();
 	#if TD_VERBOSE != TD_VERBOSE_OFF
 	// print neighbor views

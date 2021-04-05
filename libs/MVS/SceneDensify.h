@@ -46,7 +46,7 @@ namespace MVS {
 class MVS_API Scene;
 	
 // structure used to compute all depth-maps
-// 用来计算所有深度的结构体
+// 用来计算所有深度的类
 class MVS_API DepthMapsData
 {
 public:
@@ -70,6 +70,15 @@ public:
 	 * @return false 
 	 */
 	bool SelectViews(DepthData& depthData);
+	/**
+	 * @brief 初始化计算深度图的图像
+	 * 
+	 * @param[in] depthData    深度图数据
+	 * @param[in] idxNeighbor  邻域ID
+	 * @param[in] numNeighbors 邻域个数
+	 * @return true 
+	 * @return false 
+	 */
 	bool InitViews(DepthData& depthData, IIndex idxNeighbor, IIndex numNeighbors);
 	/**
 	 * @brief 深度图初始化，主要是利用特征点进行初始化
@@ -79,8 +88,16 @@ public:
 	 * @return false 
 	 */
 	bool InitDepthMap(DepthData& depthData);
+	/**
+	 * @brief 深度图计算
+	 * 
+	 * @param[in] idxImage  图像id
+	 * @return true 
+	 * @return false 
+	 */
 	bool EstimateDepthMap(IIndex idxImage);
 
+	// 滤波
 	bool RemoveSmallSegments(DepthData& depthData);
 	bool GapInterpolation(DepthData& depthData);
 	/**

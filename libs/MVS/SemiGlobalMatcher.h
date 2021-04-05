@@ -45,7 +45,7 @@
 // 所以sgm 主要介绍基于census的代价匹配
 #define SGM_SIMILARITY_WZNCC 1
 #define SGM_SIMILARITY_CENSUS 2 
-#define SGM_SIMILARITY SGM_SIMILARITY_WZNCC
+#define SGM_SIMILARITY SGM_SIMILARITY_CENSUS
 
 
 // S T R U C T S ///////////////////////////////////////////////////
@@ -94,7 +94,7 @@ public:
 	typedef CLISTDEF0IDX(Cost,Index) CostsMap; // 预先计算的视差map map of pre-computed disparity costs
 	typedef CLISTDEF0IDX(AccumCost,Index) AccumCostsMap; // 累加视差代价map map of accumulated disparity costs
 
-	enum : int { numDirs = 4 }; // 2 or 4 directions accumulated per pixel pass
+	enum : int { numDirs = 4 }; // 代价聚合路径数2 or 4 directions accumulated per pixel pass
 	#if SGM_SIMILARITY == SGM_SIMILARITY_CENSUS
 	enum : int { halfWindowSizeX = 3, halfWindowSizeY = 4 }; // patch kernel size
 	#else

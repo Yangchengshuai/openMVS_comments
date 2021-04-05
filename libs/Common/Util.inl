@@ -704,6 +704,7 @@ inline TYPE FindAbsMaxElement(const TYPE* values, size_t n) {
 
 
 // given an array of values and their bound, approximate the area covered, in percentage
+// 计算投影点覆盖的面积，用百分比表示。
 template<typename TYPE, int n, int s, bool bCentered>
 inline TYPE ComputeCoveredArea(const TYPE* values, size_t size, const TYPE* bound, int stride=n) {
 	ASSERT(size > 0);
@@ -715,13 +716,17 @@ inline TYPE ComputeCoveredArea(const TYPE* values, size_t size, const TYPE* boun
 	const MapMatrix points(values, size, n, Eigen::OuterStride<>(stride));
 	const Vector norm = MapVector(bound);
 	const Vector offset(Vector::Constant(bCentered ? TYPE(0.5) : TYPE(0)));
+	// surface是s*s大小的矩阵，以行优先。
 	MatrixSurface surface;
 	surface.setZero();
 	for (size_t i=0; i<size; ++i) {
+		// 将图像投影坐标先归一化到0-1，再乘与s(16)。即将投影坐标归一化到s*s的大小的图像上
 		const Vector point((points.row(i).cwiseQuotient(norm)+offset)*TYPE(s));
 		ASSERT((point(0)>=0 && point(0)<s) && (point(1)>=0 && point(1)<s));
+		// 根据归一化的坐标在suface上对应设置为1
 		surface(FLOOR2INT(point(0)), FLOOR2INT(point(1))) = 1;
 	}
+	//统计surface矩阵中1的个数就是我们求得覆盖面积,除矩阵的大小就是百分比，这个就是我们最终求得面积。
 	return TYPE(surface.sum())/(s*s);
 } // ComputeCoveredArea
 /*----------------------------------------------------------------*/

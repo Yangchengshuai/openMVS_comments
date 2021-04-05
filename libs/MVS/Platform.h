@@ -46,17 +46,20 @@
 namespace MVS {
 
 // a mobile platform with cameras attached to it
+// 可以理解为全局坐标系 
 class MVS_API Platform
 {
 public:
 	// structure describing a normalized camera mounted on a platform
+	// 归一化相机参数
 	typedef CameraIntern Camera;
 	typedef CLISTDEF0IDX(Camera,uint32_t) CameraArr;
 
 	// structure describing a pose along the trajectory of a platform
+	// 结构体，描述相机位姿
 	struct Pose {
-		RMatrix R; // platform's rotation matrix
-		CMatrix C; // platform's translation vector in the global coordinate system
+		RMatrix R; // 旋转矩阵世界坐标系到相机坐标系platform's rotation matrix
+		CMatrix C; // 相机原点在世界坐标系中的位置platform's translation vector in the global coordinate system
 		#ifdef _USE_BOOST
 		template <class Archive>
 		void serialize(Archive& ar, const unsigned int /*version*/) {

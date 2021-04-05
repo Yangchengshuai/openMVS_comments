@@ -567,6 +567,17 @@ void* STCALL DepthMapsData::EndDepthMapTmp(void* arg)
         原理细节主要是参考论文"Accurate Multiple View 3D Reconstruction Using Patch-Based Stereo for Large-Scale Scenes", S. Shen, 2013
  *      代价计算分两种方式一种是上述论文里面的简单的直接使用NCC来作为匹配代价；
 		另一种是带权重的代价参考论文"PatchMatch Stereo - Stereo Matching with Slanted Support Windows"公式3
+ *		以NCC为评价标准，使用传播和随机优化来估计深度图
+
+ *      给定同一场景的两个视图，我们将重建深度图的视图记为“参考图像”，将另一个视图记为“目标图像”。
+ *      第一步：在可用的稀疏点之间插值初始化深度图；
+ *      第二步：传播优化：深度图从顶部/左侧传播到底部/右侧，并在接下来的每个步骤中传递相反的方向。
+        传播过程中，对于每个像素，如果邻域的NCC评分较好，首先将当前的深度估计替换为它的邻居深度值。
+        然后通过尝试对当前深度值做一个随机调整来细化重建的深度，并保留得分最高的那个，通常2-3次迭代就足够收敛了。
+		（对于每个像素，深度和法线是通过计算参考图像中的patch与目标图像中被包裹的patch之间的NCC分数来进行评分的，这由待估计的当前值定义的单应性矩阵来决定。
+		为了在局部估计每个像素时保证一定的平滑性，如果这个像素的估计接近于相邻像素的估计，那么NCC分数就会得到额外的奖励。
+		可选地，通过将描述的迭代扩展到目标图像并删除在两个视图中不具有相似值的估计，可以检测被遮挡的像素。）
+		第三步
  * @param[in] idxImage 
  * @return true 
  * @return false 
@@ -1620,7 +1631,7 @@ bool Scene::DenseReconstruction(int nFusionMode)
 		VERBOSE("Dense point-cloud composed of:\n\t%u points with 1- views\n\t%u points with 2 views\n\t%u points with 3+ views", nPoints1m, nPoints2, nPoints3p);
 	}
 	#endif
-	// Step 3 点云颜色和法线计算（不建议，耗时）
+	// Step 3，4 点云颜色和法线计算（不建议，耗时）
 	if (!pointcloud.IsEmpty()) {
 		if (pointcloud.colors.IsEmpty() && OPTDENSE::nEstimateColors == 1)
 			EstimatePointColors(images, pointcloud);
@@ -1633,11 +1644,11 @@ bool Scene::DenseReconstruction(int nFusionMode)
 
 // do first half of dense reconstruction: depth map computation
 // results are saved to "data"
-// 
+// 稠密重建的第一半：计算结果保存在data中
 /**
  * @brief 深度图计算patch/sgm,tsgm
  * 
- * @param[in/out] data 存储深度计算的结果
+ * @param[in/out] data 存储深度计算需要的数据和计算结果：深度图
  * @return true 
  * @return false 
  */
@@ -1645,7 +1656,8 @@ bool Scene::ComputeDepthMaps(DenseDepthMapData& data)
 {
 	{
 	// maps global view indices to our list of views to be processed
-	IIndexArr imagesMap;// view在所有图像中的索引与要处理的图像list中索引对应关系。
+	// view在所有图像中的索引与要处理的图像list中索引对应关系。
+	IIndexArr imagesMap;
 
 	// prepare images for dense reconstruction (load if needed)
 	// Step 1 数据准备：load 图像，对图像进行筛选去除无效图像,并根据传入的参数nResolutionLeval对load的图像做resize,对应相机参数做同样调整。
@@ -1665,6 +1677,7 @@ bool Scene::ComputeDepthMaps(DenseDepthMapData& data)
 		FOREACH(idxImage, images) {
 		#endif
 			// skip invalid, uncalibrated or discarded images
+			// 跳过无效的，未标定的 或被丢弃的图像
 			Image& imageData = images[idxImage];
 			// isvalid 判断imageData的poseID是否等于NO_ID（无效）。我们也可以在外部传入数据时如果有些帧不想参与计算可以设置其为NO_ID
 			if (!imageData.IsValid()) {
@@ -1675,6 +1688,7 @@ bool Scene::ComputeDepthMaps(DenseDepthMapData& data)
 				continue;
 			}
 			// map image index
+			// 计算图像的map
 			#ifdef DENSE_USE_OPENMP
 			#pragma omp critical
 			#endif
@@ -1683,8 +1697,8 @@ bool Scene::ComputeDepthMaps(DenseDepthMapData& data)
 				data.images.Insert(idxImage);
 			}
 			// reload image at the appropriate resolution
-			//最大分辨率计算方式：imagesize=max(width,height), nMaxResolution=imagesize>>nResolutionLevel
-			//                  if(nMaxResolution<nMinResolution),从level为0开始找到最开始大于nMinResolution的值作为nMaxResolution;
+			//最大分辨率计算方式：imagesize=max(width,height), nMaxResolution=imagesize/2^nResolutionLevel
+			//                  if(nMaxResolution<OPTDENSE::nMinResolution),从level为0开始找到最开始大于OPTDENSE::nMinResolution的值作为nMaxResolution;
 			//                  最后 nMaxResolution=min(nMaxResolution,OPTDENSE::nMaxResolution)
 			const unsigned nMaxResolution(imageData.RecomputeMaxResolution(OPTDENSE::nResolutionLevel, OPTDENSE::nMinResolution, OPTDENSE::nMaxResolution));
 			// 根据计算的分辨率对图像进行resize
@@ -1765,6 +1779,7 @@ bool Scene::ComputeDepthMaps(DenseDepthMapData& data)
 	ASSERT(data.events.IsEmpty());
 	data.events.AddEvent(new EVTProcessImage(0));
 	// start working threads
+	// 启动工作线程
 	data.progress = new Util::Progress("Estimated depth-maps", data.images.GetSize());
 	GET_LOGCONSOLE().Pause();
 	if (nMaxThreads > 1) {
@@ -1858,7 +1873,7 @@ void Scene::DenseReconstructionEstimate(void* pData)
 			//初始化用来计算深度图的图像对，如果最佳邻域为空，则从neighbors中根据score选取不超过nNumViews neighbor views
 			if (!data.depthMaps.InitViews(depthData, data.neighborsMap.IsEmpty()?NO_ID:data.neighborsMap[evtImage.idxImage], OPTDENSE::nNumViews)) {
 				// process next image
-				// 如果当前帧没有找到邻域，则无法计算深度，直接跳过处理下一帧图像
+				// 如果当前帧没有找到邻域，则无法计算深度，直接跳过处理下一帧图像（safeInc 每次调用都会对data.idxImage加1）
 				data.events.AddEvent(new EVTProcessImage((IIndex)Thread::safeInc(data.idxImage)));
 				break;
 			}

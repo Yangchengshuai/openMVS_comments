@@ -2438,17 +2438,22 @@ cv::Size TImage<TYPE>::computeResize(const cv::Size& size, REAL scale, unsigned 
 }
 
 // compute image scale for a given max and min resolution
+// 根据给定的最大和最小分辨率及level计算参与深度图计算的图像的大小
 template <typename TYPE>
 unsigned TImage<TYPE>::computeMaxResolution(unsigned width, unsigned height, unsigned& level, unsigned minImageSize, unsigned maxImageSize)
 {
 	// consider the native resolution the max(width,height)
+	// 计算图像的最大边
 	const unsigned imageSize = MAXF(width, height);
 	// if the max level it's used, return original image size
+	// level==0 说明使用原图像参与深度图计算无需缩放，直接返回原图像实际尺寸和最大分辨率阈值中最小的值。
 	if (level == 0)
 		return MINF(imageSize, maxImageSize);
 	// compute the resolution corresponding to the desired level
+	// 计算我们期望的level的图像分辨率
 	unsigned size = (imageSize >> level);
 	// if the image is too small
+	// 如果期望level得到的图像分辨率小于我们给定的最小阈值则从最大level开始加直到出现大于等于最小阈值的最小level
 	if (size < minImageSize) {
 		// start from the max level
 		level = 0;

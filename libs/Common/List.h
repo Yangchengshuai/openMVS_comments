@@ -91,6 +91,10 @@ typedef size_t IDX;
  *   when more space is needed
  * - if using sorting, the operator < needs to be implemented (the
  *   operator == is also needed if argument is not ARG_TYPE)
+ * - "useConstruct"设为0：在array中移除或添加元素时不使用构造函数和析构函数
+ * - "useConstruct"设为1：移动arrays时使用 memcpy/memmove 而非复制构造函数
+ * - "useConstruct"设为2：总是使用构造和析构函数
+ * - "grow"的值是指当有更多空间需求时在已有的array上增加的元素个数
  **************************************************************************************/
 
 template <
@@ -108,11 +112,13 @@ public:
 	typedef int (STCALL *TFncCompare)(const void* elem, const void* key); //returns 0 if equal, otherwise <0 or >0 respectively
 
 	// construct an empty list
+	// 创建一个空list
 	inline cList() : _size(0), _vectorSize(0), _vector(NULL)
 	{
 	}
 
 	// construct a list containing size initialized elements
+	// 用已知大小的元素来构建list
 	cList(IDX size) : _size(size), _vectorSize(size), _vector((TYPE*)operator new[] (size * sizeof(TYPE)))
 	{
 		ASSERT(size > 0 && size < NO_INDEX);
@@ -120,6 +126,7 @@ public:
 	}
 
 	// construct a list containing size initialized elements and allocated space for _reserved elements
+	// 用指定元素和预分配空间的大小构建list
 	cList(IDX size, IDX _reserved) : _size(size), _vectorSize(_reserved), _vector((TYPE*)operator new[] (_reserved * sizeof(TYPE)))
 	{
 		ASSERT(_reserved >= size && _reserved < NO_INDEX);
@@ -127,6 +134,7 @@ public:
 	}
 
 	// copy constructor: creates a deep-copy of the given list
+	// 复制函数：深拷贝
 	cList(const cList& rList) : _size(rList._size), _vectorSize(rList._vectorSize), _vector(NULL)
 	{
 		if (_vectorSize == 0) {
@@ -138,6 +146,7 @@ public:
 	}
 
 	// constructor a list from a raw data array, taking ownership of the array memory
+	// 构造函数从原始数据数组中获取列表，并获得数组内存的所有权
 	explicit inline cList(IDX nSize, TYPE* pData) : _size(nSize), _vectorSize(nSize), _vector(pData)
 	{
 	}
@@ -148,6 +157,7 @@ public:
 	}
 
 	// copy the content from the given list
+	// 从给定的列表中复制内容
 	inline	cList&	operator=(const cList& rList)
 	{
 		return CopyOf(rList);
@@ -198,6 +208,7 @@ public:
 	}
 
 	// release current list and swap the content with the given list
+	// 释放当前list 并交换给定的list的内容
 	inline	cList&	CopyOfRemove(cList& rList)
 	{
 		if (this == &rList)
@@ -240,6 +251,7 @@ public:
 	}
 
 	// Swap the elements of the two lists.
+	// 交换两个list的元素
 	inline	void	Swap(cList& rList)
 	{
 		if (this == &rList)
@@ -256,6 +268,7 @@ public:
 	}
 
 	// Swap the two elements.
+	// 交换两个元素
 	inline	void	Swap(IDX idx1, IDX idx2)
 	{
 		ASSERT(idx1 < _size && idx2 < _size);
@@ -265,6 +278,7 @@ public:
 	}
 
 	// Set the allocated memory (normally used for types without constructor).
+	// 内存分配
 	inline void		Memset(uint8_t val)
 	{
 		memset(_vector, val, _size * sizeof(TYPE));
@@ -276,6 +290,7 @@ public:
 
 	// Delete the old array, and create a new one of the desired size;
 	// the old elements are deleted and the array is filled with new empty ones.
+	// 删除就的数组，创建一个指定大小的新的array，旧的元素被删除，用新的空的填充
 	inline void		Reset(IDX newSize)
 	{
 		_Release();
@@ -291,12 +306,14 @@ public:
 
 	// Pre-allocate memory for the array at the desired size;
 	// the old elements are kept.
+	// 预分配指定大小的内存，原有的数据保持不变
 	inline	void	Reserve(IDX needVectorSize)
 	{
 		if (_vectorSize < needVectorSize)
 			_Grow(needVectorSize);
 	}
 	// Same as above, but only the extra needed space is passed.
+	// 与上面相同，但是只传递额外需要的空间。
 	inline	void	ReserveExtra(IDX needVectorExtraSize)
 	{
 		if (_vectorSize < _size+needVectorExtraSize)
@@ -306,6 +323,7 @@ public:
 	// Set the size of the array at the new desired size;
 	// the old elements are kept, but only the ones that are below the new size.
 	// If increased, the array is filled with new empty elements.
+	// 将数组的大小设置为新的size,旧元素被保留，但只保留小于新size的元素;如果增加，则数组将填充新的空元素。
 	inline	void	Resize(IDX newSize)
 	{
 		if (newSize == _size)
@@ -328,6 +346,7 @@ public:
 	}
 
 	// Free unused memory.
+	// 释放未使用的内存
 	inline void		ReleaseFree()
 	{
 		if (_size < _vectorSize)
@@ -393,6 +412,7 @@ public:
 	}
 
 	// Adds a new empty element at the end of the array.
+	// 在数组末尾添加一个新的空元素。
 	inline TYPE&	AddEmpty()
 	{
 		if (_vectorSize <= _size)
@@ -414,6 +434,7 @@ public:
 	}
 
 	// Adds a new empty element at the end of the array and pass the arguments to its constructor.
+	// 在数组的末尾添加一个新的空元素，并将参数传递给它的构造函数。
 	#ifdef _SUPPORT_CPP11
 	template <typename... Args>
 	inline TYPE&	AddConstruct(Args&&... args)
@@ -442,6 +463,7 @@ public:
 	}
 
 	// Adds the new element at the end of the array.
+	// 在数组的末尾添加一个新的空元素
 	#ifdef _SUPPORT_CPP11
 	template <typename T>
 	inline void		Insert(T&& elem)
@@ -763,6 +785,7 @@ public:
 	}
 
 	// insert given element if it is in the top N
+	// 插入给定的元素，如果它在前N
 	template <int N>
 	inline void		StoreTop(ARG_TYPE elem) {
 		const IDX idx(FindFirstEqlGreater(elem));
@@ -947,6 +970,7 @@ public:
 
 	// find the matching "elem" by brute-force (front to back)
 	// returns the first element found
+	// 通过蛮力(从前到后)查找匹配的“elem”,返回找到的第一个元素
 	inline IDX		Find(ARG_TYPE elem) const
 	{
 		for (IDX i = 0; i < _size; ++i)
@@ -973,6 +997,7 @@ public:
 
 	// find the matching "elem" by brute-force (back to front)
 	// returns the first element found
+	// 通过蛮力(从后到前)查找匹配的“elem”,返回找到的第一个元素
 	inline IDX		RFind(ARG_TYPE elem) const
 	{
 		IDX i(_size);
@@ -1001,6 +1026,7 @@ public:
 	}
 
 	// call a function or lambda on each element
+	// 在每个元素上调用函数或lambda
 	template <typename Functor>
 	inline	void	ForEach(const Functor& functor) const
 	{
@@ -1040,6 +1066,7 @@ public:
 	}
 
 	// Erase each element matching "elem".
+	// 移除指定元素
 	inline void		Remove(ARG_TYPE elem)
 	{
 		IDX i = _size;
@@ -1124,6 +1151,7 @@ public:
 	}
 
 	// same as Empty(), plus free all allocated memory
+	// 内存释放
 	inline	void	Release()
 	{
 		_Release();
@@ -1133,12 +1161,14 @@ public:
 	// Discard all stored data and initialize it as an empty array.
 	// (note: call this only when you know what you are doing,
 	// you have to deallocate yourself all elements and _vector data)
+	// 丢弃所有存储的数据并将其初始化为空数组。
 	inline void		Reset()
 	{
 		_Init();
 	}
 
 	// Delete also the pointers (take care to use this function only if the elements are pointers).
+	// 删除指针元素
 	inline void		EmptyDelete()
 	{
 		while (_size)
@@ -1146,6 +1176,7 @@ public:
 	}
 
 	// same as EmptyDelete(), plus free all allocated memory
+	// 释放内存
 	inline void		ReleaseDelete()
 	{
 		EmptyDelete();
@@ -1180,6 +1211,7 @@ public:
 
 protected:
 	// Free all memory.
+	// 释放内存
 	inline	void	_Release()
 	{
 		_ArrayDestruct(_vector, _size);
@@ -1187,6 +1219,7 @@ protected:
 	}
 
 	// Initialize array.
+	// 初始化数组
 	inline	void	_Init()
 	{
 		_vector = NULL;
@@ -1194,14 +1227,17 @@ protected:
 	}
 
 	// Increase the size of the array at least to the specified amount.
+	// 将数组的大小至少增加到指定的数量。
 	inline void		_Grow(IDX newVectorSize)
 	{
 		ASSERT(newVectorSize > _vectorSize);
 		// grow by 50% or at least to minNewVectorSize
+		// 增加50%或者至少到最小size
 		const IDX expoVectorSize(_vectorSize + (_vectorSize>>1));
 		if (newVectorSize < expoVectorSize)
 			newVectorSize = expoVectorSize;
 		// allocate a larger chunk of memory, copy the data and delete the old chunk
+		// 分配一个更大的内存块，复制数据并删除旧的块
 		TYPE* const tmp(_vector);
 		_vector = (TYPE*) operator new[] (newVectorSize * sizeof(TYPE));
 		_ArrayMoveConstruct<true>(_vector, tmp, _size);
@@ -1210,6 +1246,7 @@ protected:
 	}
 
 	// Decrease the size of the array at the specified new size.
+	// 按指定的新大小减小数组的大小。
 	inline void		_Shrink(IDX newSize)
 	{
 		ASSERT(newSize <= _size);
@@ -1232,6 +1269,7 @@ protected:
 	}
 
 	// Implement construct/destruct for the array elements.
+	// 为数组元素实现构造/析构。
 	static inline void	_ArrayConstruct(TYPE* RESTRICT dst, IDX n)
 	{
 		if (useConstruct) {
@@ -1256,6 +1294,7 @@ protected:
 		}
 	}
 	// Implement copy/move for the array elements.
+	// 实现复制/移动的数组元素。
 	static inline void	_ArrayCopyRestrict(TYPE* RESTRICT dst, const TYPE* RESTRICT src, IDX n)
 	{
 		if (useConstruct) {

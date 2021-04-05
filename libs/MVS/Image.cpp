@@ -136,6 +136,7 @@ void Image::ReleaseImage()
 
 // resize image if needed
 // return scale
+// 图像缩放
 float Image::ResizeImage(unsigned nMaxResolution)
 {
 	if (!image.empty()) {
@@ -161,20 +162,24 @@ float Image::ResizeImage(unsigned nMaxResolution)
 /*----------------------------------------------------------------*/
 
 // compute image scale for a given max and min resolution, using the current image file data
+// 根据给定的最大和最小分辨率及level计算参与深度图计算的图像的大小
 unsigned Image::RecomputeMaxResolution(unsigned& level, unsigned minImageSize, unsigned maxImageSize) const
 {
 	IMAGEPTR pImage(ReadImageHeader(name));
 	if (pImage == NULL) {
 		// something went wrong, use the current known size (however it will most probably fail later)
+		// 图像是空，直接使用已知的的图像尺寸
 		return Image8U3::computeMaxResolution(width, height, level, minImageSize, maxImageSize);
 	}
 	// re-compute max image size
+	// 重新计算图像最大尺寸
 	return Image8U3::computeMaxResolution(pImage->GetWidth(), pImage->GetHeight(), level, minImageSize, maxImageSize);
 } // RecomputeMaxResolution
 /*----------------------------------------------------------------*/
 
 
 // resize image at desired scale
+// 缩放图像
 Image Image::GetImage(const PlatformArr& platforms, double scale, bool bUseImage) const
 {
 	Image scaledImage(*this);
@@ -191,6 +196,7 @@ Image Image::GetImage(const PlatformArr& platforms, double scale, bool bUseImage
 	return scaledImage;
 } // GetImage
 // compute the camera extrinsics from the platform pose and the relative camera pose to the platform
+// 计算相机内外参
 Camera Image::GetCamera(const PlatformArr& platforms, const Image8U::Size& resolution) const
 {
 	ASSERT(platformID != NO_ID);
@@ -198,15 +204,18 @@ Camera Image::GetCamera(const PlatformArr& platforms, const Image8U::Size& resol
 	ASSERT(poseID != NO_ID);
 
 	// compute the normalized absolute camera pose
+	// 计算归一化的相机位姿（原因是我们输入的相机内参f cx cy是做过归一化的即均乘了一个系数：scale=1/原图的最长边）
 	const Platform& platform = platforms[platformID];
 	Camera camera(platform.GetCamera(cameraID, poseID));
 
 	// compute the unnormalized camera
+	// 计算未归一化的相机参数即[f/cx/cy]*scale*max(resolution.width, resolution.height)
 	camera.K = camera.GetK<REAL>(resolution.width, resolution.height);
+	// 计算投影矩阵
 	camera.ComposeP();
-
 	return camera;
 } // GetCamera
+// 相机参数更新
 void Image::UpdateCamera(const PlatformArr& platforms)
 {
 	camera = GetCamera(platforms, Image8U::Size(width, height));
