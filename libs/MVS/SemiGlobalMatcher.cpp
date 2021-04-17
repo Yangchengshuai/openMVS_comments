@@ -587,7 +587,6 @@ void SemiGlobalMatcher::Match(const Scene& scene, IIndex idxImage, IIndex numNei
 		}
 		// stereo-rectify image pair
 		// Step 3_2_2_1 极线校正,H 像素坐标从原图转换到校正后的图上，Q 把校正图像上的[x' y' disparity 1] 转换到原图坐标系下 [x*z y*z z 1]*w 
-		//?主要调用的opencv函数有时间可以研究一下
 		if (!Image::StereoRectifyImages(leftImage, rightImage, leftPoints, rightPoints, leftData.imageColor, rightData.imageColor, leftMaskMap, rightMaskMap, H, Q))
 			continue;
 		ASSERT(leftData.imageColor.size() == rightData.imageColor.size());

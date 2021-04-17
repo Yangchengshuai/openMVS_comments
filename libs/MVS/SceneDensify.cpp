@@ -477,6 +477,7 @@ void* STCALL DepthMapsData::ScoreDepthMapTmp(void* arg)
 			normal = estimator.RandomNormal(viewDir);
 		} else if (normal.dot(viewDir) >= 0) {
 			// replace invalid normal with random values
+			// 如果法线与view夹角小于90，则无效，因为这种情况下是看不到点的
 			normal = estimator.RandomNormal(viewDir);
 		}
 		// 利用当前初始深度图和normal计算匹配代价wncc,计算confidence
@@ -577,7 +578,7 @@ void* STCALL DepthMapsData::EndDepthMapTmp(void* arg)
 		（对于每个像素，深度和法线是通过计算参考图像中的patch与目标图像中被包裹的patch之间的NCC分数来进行评分的，这由待估计的当前值定义的单应性矩阵来决定。
 		为了在局部估计每个像素时保证一定的平滑性，如果这个像素的估计接近于相邻像素的估计，那么NCC分数就会得到额外的奖励。
 		可选地，通过将描述的迭代扩展到目标图像并删除在两个视图中不具有相似值的估计，可以检测被遮挡的像素。）
-		第三步
+		第三步: 滤波
  * @param[in] idxImage 
  * @return true 
  * @return false 
@@ -587,6 +588,7 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 	TD_TIMER_STARTD();
 
 	// initialize depth and normal maps
+	// 初始化深度图和法向量图
 	DepthData& depthData(arrDepthData[idxImage]);
 	ASSERT(depthData.images.GetSize() > 1 && !depthData.points.IsEmpty());
 	const DepthData::ViewData& image(depthData.images.First());
@@ -614,8 +616,10 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 			const Point3 camX(camera.TransformPointW2C(Cast<REAL>(X)));
 			const ImageRef x(ROUND2INT(camera.TransformPointC2I(camX)));
 			const float d((float)camX.z);
+			// 计算以投影点为中心的窗口起始点
 			const ImageRef sx(MAXF(x.x-nPixelArea,0), MAXF(x.y-nPixelArea,0));
 			const ImageRef ex(MINF(x.x+nPixelArea,size.width-1), MINF(x.y+nPixelArea,size.height-1));
+			// 将这个窗口内的所有像素都设为与投影点相同的深度值
 			for (int y=sx.y; y<=ex.y; ++y) {
 				for (int x=sx.x; x<=ex.x; ++x) {
 					depthData.depthMap(y,x) = d;
@@ -627,6 +631,7 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 			if (depthData.dMax < d)
 				depthData.dMax = d;
 		}
+		// 略微扩大下深度范围
 		depthData.dMin *= 0.9f;
 		depthData.dMax *= 1.1f;
 	} else {
@@ -636,6 +641,7 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 	}
 
 	// init integral images and index to image-ref map for the reference data
+	// 初始化积分图和参考图的索引map
 	#if DENSE_NCC == DENSE_NCC_WEIGHTED
 	DepthEstimator::WeightMap weightMap0(size.area()-(size.width+1)*DepthEstimator::nSizeHalfWindow);
 	#else
@@ -654,6 +660,7 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 	}
 
 	// init threads
+	// 线程初始化
 	ASSERT(nMaxThreads > 0);
 	cList<DepthEstimator> estimators;
 	estimators.Reserve(nMaxThreads);
@@ -666,6 +673,7 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 	// Step 3_2_2 PM:score confidence初始化，预先计算reference帧每个像素的ncc相关计算
 	{
 		// create working threads
+		// 创建工作线程
 		idxPixel = -1;
 		ASSERT(estimators.IsEmpty());
 		while (estimators.GetSize() < nMaxThreads)
@@ -682,11 +690,13 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 			threads[i].start(ScoreDepthMapTmp, &estimators[i]);
 		ScoreDepthMapTmp(&estimators.Last());
 		// wait for the working threads to close
+		// 等待线程关闭
 		FOREACHPTR(pThread, threads)
 			pThread->join();
 		estimators.Release();
 		#if TD_VERBOSE != TD_VERBOSE_OFF
 		// save rough depth map as image
+		// 保存深度图
 		if (g_nVerbosityLevel > 4) {
 			ExportDepthMap(ComposeDepthFilePath(image.GetID(), "rough.png"), depthData.depthMap);
 			ExportNormalMap(ComposeDepthFilePath(image.GetID(), "rough.normal.png"), depthData.normalMap);
@@ -699,6 +709,7 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 	// Step 3_2_3 PM:depth迭代优化： 邻域传播和随机优化
 	for (unsigned iter=0; iter<OPTDENSE::nEstimationIters; ++iter) {
 		// create working threads
+		// 线程启动
 		idxPixel = -1;
 		ASSERT(estimators.IsEmpty());
 		while (estimators.GetSize() < nMaxThreads)
@@ -715,6 +726,7 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 			threads[i].start(EstimateDepthMapTmp, &estimators[i]);
 		EstimateDepthMapTmp(&estimators.Last());
 		// wait for the working threads to close
+		// 等待线程结束
 		FOREACHPTR(pThread, threads)
 			pThread->join();
 		estimators.Release();
@@ -764,6 +776,7 @@ bool DepthMapsData::EstimateDepthMap(IIndex idxImage)
 
 
 // filter out small depth segments from the given depth map
+// 从给定的深度图中过滤出小的深度段
 bool DepthMapsData::RemoveSmallSegments(DepthData& depthData)
 {
 	const float fDepthDiffThreshold(OPTDENSE::fDepthDiffThreshold*0.7f);
@@ -775,6 +788,7 @@ bool DepthMapsData::RemoveSmallSegments(DepthData& depthData)
 	const ImageRef size(depthMap.size());
 
 	// allocate memory on heap for dynamic programming arrays
+	// 在堆上为动态编程数组分配内存
 	TImage<bool> done_map(size, false);
 	CAutoPtrArr<ImageRef> seg_list(new ImageRef[size.x*size.y]);
 	unsigned seg_list_count;
@@ -782,14 +796,17 @@ bool DepthMapsData::RemoveSmallSegments(DepthData& depthData)
 	ImageRef neighbor[4];
 
 	// for all pixels do
+	// 逐像素处理
 	for (int u=0; u<size.x; ++u) {
 		for (int v=0; v<size.y; ++v) {
 			// if the first pixel in this segment has been already processed => skip
+			// 如果这个段中的第一个像素已经被处理=>跳过
 			if (done_map(v,u))
 				continue;
 
 			// init segment list (add first element
 			// and set it to be the next element to check)
+			// 初始化 分割list
 			seg_list[0] = ImageRef(u,v);
 			seg_list_count = 1;
 			seg_list_curr  = 0;
@@ -797,36 +814,46 @@ bool DepthMapsData::RemoveSmallSegments(DepthData& depthData)
 			// add neighboring segments as long as there
 			// are none-processed pixels in the seg_list;
 			// none-processed means: seg_list_curr<seg_list_count
+			// 只要seg_list中有未处理的像素，就添加相邻的分割块
 			while (seg_list_curr < seg_list_count) {
 				// get address of current pixel in this segment
+				// 取当前像素在这个分割块中的地址
 				const ImageRef addr_curr(seg_list[seg_list_curr]);
 				const Depth& depth_curr = depthMap(addr_curr);
 
 				if (depth_curr>0) {
 					// fill list with neighbor positions
+					// 用邻域像素填充list
 					neighbor[0] = ImageRef(addr_curr.x-1, addr_curr.y  );
 					neighbor[1] = ImageRef(addr_curr.x+1, addr_curr.y  );
 					neighbor[2] = ImageRef(addr_curr.x  , addr_curr.y-1);
 					neighbor[3] = ImageRef(addr_curr.x  , addr_curr.y+1);
 
 					// for all neighbors do
+					// 处理每一个邻域
 					for (int i=0; i<4; ++i) {
 						// get neighbor pixel address
+						// 取邻域坐标
 						const ImageRef& addr_neighbor(neighbor[i]);
 						// check if neighbor is inside image
+						// 确认邻域是否在图像内
 						if (addr_neighbor.x>=0 && addr_neighbor.y>=0 && addr_neighbor.x<size.x && addr_neighbor.y<size.y) {
 							// check if neighbor has not been added yet
+							// 确认邻域是否已经被处理过
 							bool& done = done_map(addr_neighbor);
 							if (!done) {
 								// check if the neighbor is valid and similar to the current pixel
+								// 确认邻域是否属于当前分割块
 								// (belonging to the current segment)
 								const Depth& depth_neighbor = depthMap(addr_neighbor);
 								if (depth_neighbor>0 && IsDepthSimilar(depth_curr, depth_neighbor, fDepthDiffThreshold)) {
 									// add neighbor coordinates to segment list
+									// 如果属于则加到分割块的list中
 									seg_list[seg_list_count++] = addr_neighbor;
 									// set neighbor pixel in done_map to "done"
 									// (otherwise a pixel may be added 2 times to the list, as
 									//  neighbor of one pixel and as neighbor of another pixel)
+									// 标记邻域已被处理过
 									done = true;
 								}
 							}
@@ -835,15 +862,19 @@ bool DepthMapsData::RemoveSmallSegments(DepthData& depthData)
 				}
 
 				// set current pixel in seg_list to "done"
+				// 在seg列表中设置当前像素为“已完成”
 				++seg_list_curr;
 
 				// set current pixel in done_map to "done"
+				// 标记当前像素已被处理过
 				done_map(addr_curr) = true;
 			} // end: while (seg_list_curr < seg_list_count)
 
 			// if segment NOT large enough => invalidate pixels
+			// 如果分割块大小不够大，就认为是无效的将其剔除
 			if (seg_list_count < speckle_size) {
 				// for all pixels in current segment invalidate pixels
+				// 把无效的像素深度都置为0
 				for (unsigned i=0; i<seg_list_count; ++i) {
 					depthMap(seg_list[i]) = 0;
 					if (!normalMap.empty()) normalMap(seg_list[i]) = Normal::ZERO;
@@ -858,6 +889,7 @@ bool DepthMapsData::RemoveSmallSegments(DepthData& depthData)
 /*----------------------------------------------------------------*/
 
 // try to fill small gaps in the depth map
+// 填充小的洞
 bool DepthMapsData::GapInterpolation(DepthData& depthData)
 {
 	const float fDepthDiffThreshold(OPTDENSE::fDepthDiffThreshold*2.5f);
@@ -868,18 +900,20 @@ bool DepthMapsData::GapInterpolation(DepthData& depthData)
 	ASSERT(!depthMap.empty());
 	const ImageRef size(depthMap.size());
 
-	// 1. Row-wise:
+	// 1. Row-wise: 处理行
 	// for each row do
 	for (int v=0; v<size.y; ++v) {
 		// init counter
 		unsigned count = 0;
 
-		// for each element of the row do
+		// for each element of the row do处理每一行的每个像素
 		for (int u=0; u<size.x; ++u) {
 			// get depth of this location
+			// 取深度值
 			const Depth& depth = depthMap(v,u);
 
 			// if depth not valid => count and skip it
+			// 无效跳过，并记录
 			if (depth <= 0) {
 				++count;
 				continue;
@@ -888,12 +922,15 @@ bool DepthMapsData::GapInterpolation(DepthData& depthData)
 				continue;
 
 			// check if speckle is small enough
+			// 判断洞是否足够小
 			// and value in range
 			if (count <= nIpolGapSize && (unsigned)u > count) {
 				// first value index for interpolation
+				// 第一个要插值的索引
 				int u_curr(u-count);
 				const int u_first(u_curr-1);
 				// compute mean depth
+				// 计算洞的两端深度的平均深度
 				const Depth& depthFirst = depthMap(v,u_first);
 				if (IsDepthSimilar(depthFirst, depth, fDepthDiffThreshold)) {
 					#if 0
@@ -904,6 +941,7 @@ bool DepthMapsData::GapInterpolation(DepthData& depthData)
 					} while (++u_curr<u);						
 					#else
 					// interpolate values
+					// 线性插值
 					const Depth diff((depth-depthFirst)/(count+1));
 					Depth d(depthFirst);
 					const float c(confMap.empty() ? 0.f : MINF(confMap(v,u_first), confMap(v,u)));
@@ -933,7 +971,7 @@ bool DepthMapsData::GapInterpolation(DepthData& depthData)
 		}
 	}
 
-	// 2. Column-wise:
+	// 2. Column-wise: 处理每一列同上
 	// for each column do
 	for (int u=0; u<size.x; ++u) {
 
@@ -1153,7 +1191,7 @@ bool DepthMapsData::FilterDepthMap(DepthData& depthDataRef, const IIndexArr& idx
 							negConf += confMaps[n](xRef);
 						} else {
 							// free-space violation
-							// 比d小在在重建模型内部
+							// 比d小，因为我们只信任靠近相机的深度值，所以还是取当前深度在邻域投影的值对应的置信度
 							const DepthData& depthData = arrDepthData[depthDataRef.neighbors[idxNeighbors[n]].idx.ID];
 							const Camera& camera = depthData.images.First().camera;
 							const Point3 X(cameraRef.TransformPointI2W(Point3(xRef.x,xRef.y,depth)));
@@ -1940,7 +1978,7 @@ void Scene::DenseReconstructionEstimate(void* pData)
 				data.events.AddEventFirst(new EVTSaveDepthMap(evtImage.idxImage));
 			}
 			break; }
-		// Step 3_3 depth 优化 移除小的segment 填充gap	
+		// Step 3_3 depth 优化 移除小的连通域segment 填充小洞gap	
 		case EVT_OPTIMIZEDEPTHMAP: {
 			const EVTOptimizeDepthMap&  evtImage = *((EVTOptimizeDepthMap*)(Event*)evt);
 			const IIndex idx = data.images[evtImage.idxImage];

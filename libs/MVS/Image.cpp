@@ -241,6 +241,22 @@ REAL Image::ComputeFOV(int dir) const
 //  - H converts a pixel from original to rectified left-image
 //  - Q converts [x' y' disparity 1] in rectified coordinates to [x*z y*z z 1]*w in original image coordinates
 //    where disparity=x1-x2
+/**
+ * @brief 极线校正
+ * 
+ * @param[in] image1  左图像
+ * @param[in] image2  右图像
+ * @param[in] points1 左图向的匹配点
+ * @param[in] points2 右图像的匹配点
+ * @param[out] rectifiedImage1 校正后的左图像
+ * @param[out] rectifiedImage2 校正后的右图像
+ * @param[out] mask1           标记图像上有效的可以用来计算视差像素
+ * @param[out] mask2           同上
+ * @param[out] H               转换矩阵，将左图校正前的uv坐标转换到校正后的
+ * @param[out] Q               将校正后坐标系下uv 和视差转成校正前的深度图
+ * @return true 
+ * @return false 
+ */
 bool Image::StereoRectifyImages(const Image& image1, const Image& image2, const Point3fArr& points1, const Point3fArr& points2, Image8U3& rectifiedImage1, Image8U3& rectifiedImage2, Image8U& mask1, Image8U& mask2, Matrix3x3& H, Matrix4x4& Q)
 {
 	ASSERT(image1.IsValid() && image2.IsValid());
@@ -259,6 +275,7 @@ bool Image::StereoRectifyImages(const Image& image1, const Image& image2, const 
 	#endif
 
 	// compute rectification
+	// 校正计算
 	Matrix3x3 K1, K2, R1, R2;
 	#if 0
 	const REAL t(Camera::StereoRectify(image1.GetSize(), image1.camera, image2.GetSize(), image2.camera, R1, R2, K1, K2));
@@ -287,12 +304,14 @@ bool Image::StereoRectifyImages(const Image& image1, const Image& image2, const 
 		return false;
 
 	// adjust rectified camera matrices such that the entire area common to both source images is contained in the rectified images
+	// 调整校正后的相机矩阵，使两个源图像的公共区域都包含在校正后的图像中
 	cv::Size size1(image1.GetSize()), size2(image2.GetSize());
 	if (!points1.empty())
 		Camera::SetStereoRectificationROI(points1, size1, image1.camera, points2, size2, image2.camera, R1, R2, K1, K2);
 	ASSERT(size1 == size2);
 
 	// compute rectification homography (from original to rectified image)
+	// 计算校正的单应性矩阵（描述的是两个图像像素坐标的转换矩阵H[u,v,1]^t=[u',v',1]^t）(从原始图像到校正图像)
 	const Matrix3x3 H1(K1 * R1 * image1.camera.GetInvK()); H = H1;
 	const Matrix3x3 H2(K2 * R2 * image2.camera.GetInvK());
 
@@ -313,12 +332,14 @@ bool Image::StereoRectifyImages(const Image& image1, const Image& image2, const 
 	#endif
 
 	// rectify images (apply homographies)
+	// 校正图像,就是利用单应性矩阵，把原图像每个像素坐标转换到校正的图像下。
 	rectifiedImage1.create(size1);
 	cv::warpPerspective(image1.image, rectifiedImage1, H1, rectifiedImage1.size());
 	rectifiedImage2.create(size2);
 	cv::warpPerspective(image2.image, rectifiedImage2, H2, rectifiedImage2.size());
 
 	// mark valid regions covered by the rectified images
+	// 标记正确图像覆盖的有效区域
 	struct Compute {
 		static void Mask(Image8U& mask, const cv::Size& sizeh, const cv::Size& size, const Matrix3x3& H) {
 			mask.create(sizeh);
@@ -342,6 +363,7 @@ bool Image::StereoRectifyImages(const Image& image1, const Image& image2, const 
 	// and the formula that converts the image projection from right to left x_r=K1*K2.inv()*x_l
 	// compute the inverse projection matrix that transforms image coordinates in image 1 and its
 	// corresponding disparity value to the 3D point in camera 1 coordinates as:
+	// 根据depth=Bf/d的关系，计算投影矩阵Q将校正的视差图转到为校正的深度图。
 	ASSERT(ISEQUAL(K1(1,1),K2(1,1)));
 	Q = Matrix4x4::ZERO;
 	//   Q * [x, y, disparity, 1] = [X, Y, Z, 1] * w
@@ -354,6 +376,7 @@ bool Image::StereoRectifyImages(const Image& image1, const Image& image2, const 
 	Q(3,3) =  (K1(0,2)-K2(0,2))/t;
 
 	// compute Q that converts disparity from rectified to depth in original image
+	// 计算将视差从校正到原始图像深度转换的Q值
 	Matrix4x4 P(Matrix4x4::IDENTITY);
 	cv::Mat(image1.camera.K*R1.t()).copyTo(cv::Mat(4,4,cv::DataType<Matrix4x4::Type>::type,P.val)(cv::Rect(0,0,3,3)));
 	Q = P*Q;

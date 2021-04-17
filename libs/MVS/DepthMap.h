@@ -143,9 +143,9 @@ struct WeightedPatchFix {
 		float weight;
 		float tempWeight;
 	};
-	Pixel weights[nTexels];
-	float sumWeights;
-	float normSq0;
+	Pixel weights[nTexels]; // 存放的时patch内每个像素的权重值
+	float sumWeights;       // 权重的和
+	float normSq0;          // Σweight*（image0.image(x0.y+i, x0.x+j)-normSq0_temp/sumWeights)^2
 	WeightedPatchFix() : normSq0(0) {}
 };
 
@@ -477,7 +477,7 @@ struct MVS_API DepthEstimator {
 	const float smoothSigmaDepth, smoothSigmaNormal;
 	const float thMagnitudeSq;
 	const float angle1Range, angle2Range;
-	const float thConfSmall, thConfBig, thConfRand;
+	const float thConfSmall, thConfBig, thConfRand; // 随机优化的时候，随机区间设置需要参考的三个置信度阈值，rand是值最大的
 	const float thRobust;
 	#if DENSE_REFINE == DENSE_REFINE_EXACT
 	const float thPerturbation;
