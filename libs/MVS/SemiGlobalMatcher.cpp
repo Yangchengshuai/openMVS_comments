@@ -1314,9 +1314,7 @@ void SemiGlobalMatcher::Match(const ViewData& leftImage, const ViewData& rightIm
 		AccumCost* accums = imageAccumCosts.data()+pixel.idx; \
 		for (int idxDir=0; idxDir<numDirs; ++idxDir) { \
 			const ImageRef& dir = dirs[idxDir]; \
-			// 路径上的聚合路径
 			const LineData& Lp = lines(idxDir,1+dir.y,_x+dir.x); \
-			// ls 是当前像素的路径
 			LineData& Ls = lines(idxDir,1,_x); \
 			Ls.R = pixel.range; \
 			const ImageRef xp(c+dx, r+dy); \
