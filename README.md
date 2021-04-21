@@ -15,7 +15,7 @@ OpenMVS 注释版
 
 课程目录：
 
-<img src="https://github.com/ReeseL/pictures_lib/raw/main/02.jpg" alt="c1_22" style="zoom:200%;" />
+<img src="https://github.com/ReeseL/pictures_lib/raw/main/03.png" alt="c1_22" style="zoom:200%;" />
 
 课程入口：
 
