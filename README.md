@@ -11,6 +11,14 @@ OpenMVS 注释版
 
 4、install时候如果opencv报一些未定义错误，需要自己换更高级别的版本，比如opencv3或4从源码安装。
 
+附：
+
+课程目录：
+
+![line](https://github.com/ReeseL/pictures_lib/raw/main/02.jpg)
+课程入口：
+![in](https://github.com/ReeseL/pictures_lib/raw/main/01.jpg)
+
 ---
 
 # OpenMVS: open Multi-View Stereo reconstruction library
