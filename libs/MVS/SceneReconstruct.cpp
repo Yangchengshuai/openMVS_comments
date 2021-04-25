@@ -241,15 +241,19 @@ struct vert_info_t {
 			const PointCloud::View viewID(_views[i]);
 			const PointCloud::Weight weight(pweights ? (*pweights)[i] : PointCloud::Weight(1));
 			// insert viewID in increasing order
+			// 以一个递增的顺序插入viewID 
+			// 0 4 5
 			const uint32_t idx(views.FindFirstEqlGreater(viewID));
 			if (idx < views.GetSize() && views[idx] == viewID) {
 				// the new view is already in the array
 				ASSERT(views.FindFirst(viewID) == idx);
 				// update point's weight
+				// 更新点的权重
 				views[idx].weight += weight;
 			} else {
 				// the new view is not in the array,
 				// insert it
+				// 新的view不在数组中就插入它
 				views.InsertAt(idx, view_t(viewID, weight));
 				ASSERT(views.IsSorted());
 			}
@@ -294,7 +298,7 @@ void vert_info_t::AllocateInfo() {
 
 struct camera_cell_t {
 	cell_handle_t cell; // 该相机原点所在的cell. cell containing the camera
-	std::vector<facet_t> facets; // 相机在凸包外：该相机视锥内看到的所有faces。相机在凸包内：则是cell的四个面。all facets on the convex-hull in view of the camera (ordered by importance)
+	std::vector<facet_t> facets; // 相机在凸包外：该相机视锥内看到的所有凸包上的faces。相机在凸包内：则是cell的四个面。all facets on the convex-hull in view of the camera (ordered by importance)
 };
 
 struct adjacent_vertex_back_inserter_t {
@@ -386,7 +390,7 @@ inline bool checkPointInside(const point_t& a, const point_t& b, const point_t& 
 // find all facets on the convex-hull and inside the camera frustum,
 // else return all four cell's facets
 // 寻找所有与该相机相关的facet
-// camCell.cell是infinite（在凸包外面），则需找到image视锥中包含的所有facet
+// camCell.cell是infinite（在凸包外面），则需找到image视锥中包含的所有凸包上的facet
 // 如果不是（在凸包内部），只需找到cell的四个facet
 template <int FacetOrientation>
 void fetchCellFacets(const delaunay_t& Tr, const std::vector<facet_t>& hullFacets, const cell_handle_t& cell, const Image& imageData, std::vector<facet_t>& facets)
@@ -414,6 +418,7 @@ void fetchCellFacets(const delaunay_t& Tr, const std::vector<facet_t>& hullFacet
 	const point_t ptOrigin(MVS2CGAL(imageData.camera.C));
 	for (const facet_t& face: hullFacets) {
 		// add face if visible
+		//如果可见，加入face
 		const triangle_t verts(Tr.triangle(face));
 		if (orientation(verts[0], verts[1], verts[2], ptOrigin) != FacetOrientation)
 			continue;
@@ -825,17 +830,17 @@ float computePlaneSphereAngle(const delaunay_t& Tr, const facet_t& facet)
 // and the surface is such extracted.
 /**
  * @brief mesh重建：首先用之前depth计算得到的点云，逐点插入（插入过程中如果待插入点与上一个已插入的点在view中投影足够远）构建四面体。
- *                  计算score四面体构建的每条边，参考论文（Multi-View Reconstruction PreservingWeakly-Supported Surfaces），最后用graphcut提取重建的曲面。
+ *                  计算score四面体构建的每条边，参考论文（Multi-View Reconstruction Preserving Weakly-Supported Surfaces），最后用graphcut提取重建的曲面。
  * @param[in] distInsert           // 插入点的最近距离，待插入点与已插入点距离要不小于这个值，小于则不插入。控制插入点的密度，太密集也会影响后续计算效率。
  * @param[in] bUseFreeSpaceSupport // 是否使用 free space support
  * @param[in] nItersFixNonManifold // 修复mesh的非流形结构的迭代次数
  * @param[in] kSigma   表示最小可重构对象
  * @param[in] kQual     
- * @param[in] kb 
- * @param[in] kf 
- * @param[in] kRel 
- * @param[in] kAbs 
- * @param[in] kOutl 
+ * @param[in] kb       判断Weakly-Supported Surfaces 参数
+ * @param[in] kf       同上
+ * @param[in] kRel     同上
+ * @param[in] kAbs     同上
+ * @param[in] kOutl    同上
  * @param[in] kInf graphcut s-t中s权重为常数默认kInf=(float)(INT_MAX/8)
  * @return true 
  * @return false 
@@ -1015,9 +1020,10 @@ bool Scene::ReconstructMesh(float distInsert, bool bUseFreeSpaceSupport, unsigne
 
 		DEBUG_EXTRA("Delaunay tetrahedralization completed: %u points -> %u vertices, %u (+%u) cells, %u (+%u) faces (%s)", indices.size(), delaunay.number_of_vertices(), delaunay.number_of_finite_cells(), delaunay.number_of_cells()-delaunay.number_of_finite_cells(), delaunay.number_of_finite_facets(), delaunay.number_of_facets()-delaunay.number_of_finite_facets(), TD_TIMER_GET_FMT().c_str());
 	}
-    // Step 参数计算
+    // Step 2 参数计算
 	// for every camera-point ray intersect it with the tetrahedrons and
 	// add alpha_vis(point) to cell's directed edge in the graph
+	// 每个相机-点的ray若与四面体相交，则把alpha_vis加到对应的边上
 	{
 		TD_TIMER_STARTD();
 
@@ -1210,7 +1216,7 @@ bool Scene::ReconstructMesh(float distInsert, bool bUseFreeSpaceSupport, unsigne
 	}
 
 	// run graph-cut and extract the mesh
-	// 根据上面计算的s-t权重计算graph-cut提取mesh
+	// Step 3 根据上面计算的s-t权重计算graph-cut提取mesh
 	{
 		TD_TIMER_STARTD();
 
@@ -1271,6 +1277,7 @@ bool Scene::ReconstructMesh(float distInsert, bool bUseFreeSpaceSupport, unsigne
 					face[v] = pairItID.first->second;
 				}
 				// correct face orientation
+				// 纠正face方向
 				if (!ciType)
 					std::swap(face[0], face[2]);
 			}

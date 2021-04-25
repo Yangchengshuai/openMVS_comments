@@ -1155,7 +1155,7 @@ bool MVS::TriangulatePoints2DepthMap(
 		inline void operator()(const ImageRef& pt) {
 			if (!depthMap.isInside(pt))
 				return;
-			//深度z计算： (n/d)x=1 ,x=depth*k[u,v,1] 则 depth=（n/d）*k[u,v,1]
+			//深度z计算： (n/d)x=1 ,x=depth*k_inv[u,v,1] 则 depth=（n/d）*k_inv[u,v,1]
 			const Depth z(INVERT(normalPlane.dot(P.TransformPointI2C(Point2f(pt)))));
 			if (z <= 0) // due to numerical instability
 				return;
