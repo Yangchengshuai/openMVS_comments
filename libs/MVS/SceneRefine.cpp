@@ -78,14 +78,14 @@ typedef Mesh::FIndex FIndex;
 
 class MeshRefine {
 public:
-	typedef TPoint3<Real> Grad;
-	typedef CLISTDEF0IDX(Grad,VIndex) GradArr;
+	typedef TPoint3<Real> Grad; // 梯度
+	typedef CLISTDEF0IDX(Grad,VIndex) GradArr; // 存放每个点梯度的list
 
-	typedef std::unordered_set<FIndex> CameraFaces;
-	typedef SEACAVE::cList<CameraFaces,const CameraFaces&,2> CameraFacesArr;
+	typedef std::unordered_set<FIndex> CameraFaces; // 无序集合：存放相机能看到的所有face的id
+	typedef SEACAVE::cList<CameraFaces,const CameraFaces&,2> CameraFacesArr; //上述的list
 
-	typedef TImage<cuint32_t> FaceMap;
-	typedef TImage<Point3f> BaryMap;
+	typedef TImage<cuint32_t> FaceMap; // 存放投影到图像上的face的id（每个像素值是face id）
+	typedef TImage<Point3f> BaryMap;  // 图像上每个像素对应的空间位置在face中的重心坐标
 
 	// store necessary data about a view
 	// view 存储每帧图像相关信息
@@ -150,6 +150,7 @@ public:
 	double ScoreMesh(double* gradients);
 
 	// given a vertex position and a projection camera, compute the projected position and its derivative
+	// 投影顶点到图像上
 	template <typename TP, typename TX, typename T, typename TJ>
 	static T ProjectVertex(const TP* P, const TX* X, T* x, TJ* jacobian=NULL);
 
@@ -197,17 +198,18 @@ public:
 	void ThSmoothVertices2(VIndex idxStart, VIndex idxEnd);
 
 public:
-	const Real weightRegularity; // a scalar regularity weight to balance between photo-consistency and regularization terms
-	Real ratioRigidityElasticity; // a scalar ratio used to compute the regularity gradient as a combination of rigidity and elasticity
-	const unsigned nResolutionLevel; // how many times to scale down the images before mesh optimization
-	const unsigned nMinResolution; // how many times to scale down the images before mesh optimization
-	const unsigned nReduceMemory; // recompute image mean and variance in order to reduce memory requirements
-	unsigned nAlternatePair; // using an image pair alternatively as reference image (0 - both, 1 - alternate, 2 - only left, 3 - only right)
-	unsigned iteration; // current refinement iteration
+	const Real weightRegularity; // 光度一致性和正则项平衡系数a scalar regularity weight to balance between photo-consistency and regularization terms
+	Real ratioRigidityElasticity; // 正则项系数a scalar ratio used to compute the regularity gradient as a combination of rigidity and elasticity
+	const unsigned nResolutionLevel; // 控制用来优化mesh的图像分辨率how many times to scale down the images before mesh optimization
+	const unsigned nMinResolution; // 图像最小分辨率how many times to scale down the images before mesh optimization
+	const unsigned nReduceMemory; // 是否减少内存占用recompute image mean and variance in order to reduce memory requirements
+	unsigned nAlternatePair; // 控制如何使用图像对里面图像的作为参考图像using an image pair alternatively as reference image (0 - both, 1 - alternate, 2 - only left, 3 - only right)
+	unsigned iteration; // 记录第几次迭代 current refinement iteration
 
-	Scene& scene; // the mesh vertices and faces
+	Scene& scene; // 存放mesh的顶点和facethe mesh vertices and faces
 
 	// gradient related
+	// 梯度相关的变量
 	float scorePhoto;
 	float scoreSmooth;
 	GradArr photoGrad;
@@ -217,19 +219,21 @@ public:
 	GradArr smoothGrad2;
 
 	// valid after ListCameraFaces()
-	Mesh::NormalArr& faceNormals; // normals corresponding to each face
+	Mesh::NormalArr& faceNormals; //每个face的法线 normals corresponding to each face
 
 	// valid the entire time, but changes
-	Mesh::VertexArr& vertices;
-	Mesh::FaceArr& faces;
-	Mesh::VertexVerticesArr& vertexVertices; // for each vertex, the list of adjacent vertices
-	Mesh::VertexFacesArr& vertexFaces; // for each vertex, the list of faces containing it
-	BoolArr& vertexBoundary; // for each vertex, stores if it is at the boundary or not
+	// 整个期间都有效
+	Mesh::VertexArr& vertices; // 顶点
+	Mesh::FaceArr& faces; // face
+	Mesh::VertexVerticesArr& vertexVertices; // 每个顶点相邻的顶点（one-ring 顶点） for each vertex, the list of adjacent vertices
+	Mesh::VertexFacesArr& vertexFaces; // 每个顶点包含的facesfor each vertex, the list of faces containing it
+	BoolArr& vertexBoundary; // 存储每个顶点是否在边界for each vertex, stores if it is at the boundary or not
 
 	// constant the entire time
-	ImageArr& images;
-	ViewsArr views; // views' data
-	PairIdxArr pairs; // image pairs used to refine the mesh
+	// 整个优化期间固定不变的量
+	ImageArr& images; // 用来优化的图像
+	ViewsArr views; // 图像信息views' data
+	PairIdxArr pairs; // 用来优化mesh的图像对image pairs used to refine the mesh
 
 	// multi-threading
 	static SEACAVE::EventQueue events; // internal events queue (processed by the working threads)
@@ -892,7 +896,7 @@ void MeshRefine::ComputeLocalVariance(const Image32F& image, const BitMatrix& ma
 				imageSumSq(r+HalfSize+1, c-HalfSize  ) -
 				imageSumSq(r-HalfSize,   c+HalfSize+1) +
 				imageSumSq(r-HalfSize,   c-HalfSize  ) ) * (1.0/(double)n));
-			// 计算方差 var=ΣI^2 - mean(I)*mean(I) 简化版
+			// 计算方差 var=1/n*ΣI^2 - mean(I)*mean(I) 简化版
 			imageVar(r,c) = MAXF(sumSq-SQUARE(imageMean(r,c)), Real(0.0001));
 		}
 	}
@@ -1345,6 +1349,7 @@ void MeshRefine::ThSmoothVertices2(VIndex idxStart, VIndex idxEnd)
 #pragma pop_macro("LOG")
 
 namespace ceres {
+// 构建最小二乘问题
 class MeshProblem : public FirstOrderFunction, public IterationCallback
 {
 public:
@@ -1375,6 +1380,7 @@ public:
 			gradients.Resize(refine.vertices.GetSize());
 			gradient = (double*)gradients.Begin();
 		}
+		// 代价函数计算模型
 		*cost = refine.ScoreMesh(gradient);
 		return true;
 	}
@@ -1407,13 +1413,13 @@ protected:
  * @param[in] nMinResolution    用来refine的图片最小分辨率
  * @param[in] nMaxViews         最大view个数
  * @param[in] fDecimateMesh     下采样率
- * @param[in] nCloseHoles       用来补洞的阈值，洞大于该值才会补
+ * @param[in] nCloseHoles       用来补洞的阈值，洞小于该值才会补
  * @param[in] nEnsureEdgeSize   是否保持边界
  * @param[in] nMaxFaceArea      refine过程中网格三角面的面积最大值（单位是像素）如果想让最终网格稠密可以将此值设小但是会比较耗性能
  * @param[in] nScales           控制用几个图像尺度去优化mesh 默认3
  * @param[in] fScaleStep        尺度步长 默认0.5
  * @param[in] nReduceMemory     是否减少内存占用 默认1
- * @param[in] nAlternatePair    可选择的图像对
+ * @param[in] nAlternatePair    控制如何使用图像对里面图像的作为参考图像using an image pair alternatively as reference image (0 - both, 1 - alternate, 2 - only left, 3 - only right)
  * @param[in] fRegularityWeight 权重系数
  * @param[in] fRatioRigidityElasticity 
  * @param[in] fThPlanarVertex   平面顶点阈值
@@ -1451,7 +1457,7 @@ bool Scene::RefineMesh(unsigned nResolutionLevel, unsigned nMinResolution, unsig
 		refine.SubdivideMesh(nMaxFaceArea, nScale == 0 ? fDecimateMesh : 1.f, nCloseHoles, nEnsureEdgeSize);
 
 		// extract array of triangle normals
-		// Step 4提取每个三角面的法线
+		// Step 4提取每个三角面的信息
 		refine.ListVertexFacesPost();
 
 		#if TD_VERBOSE != TD_VERBOSE_OFF
@@ -1459,7 +1465,7 @@ bool Scene::RefineMesh(unsigned nResolutionLevel, unsigned nMinResolution, unsig
 			mesh.Save(MAKE_PATH(String::FormatString("MeshRefine%u.ply", nScales-nScale-1)));
 		#endif
 
-		// Step 5 计算最小化每个顶点调整量：两种方法：一种直接使用ceres库进行优化，一种直接实现迭代优化。
+		// Step 5 计算最小化目标函数：两种方法：一种直接使用ceres库进行优化，一种直接实现迭代优化。
 		#ifdef MESHOPT_CERES
 		// Ceres求解优化问题见课件介绍 
 		if (fGradientStep == 0) {
@@ -1473,6 +1479,7 @@ bool Scene::RefineMesh(unsigned nResolutionLevel, unsigned nMinResolution, unsig
 			ceres::GradientProblemSolver::Options options;
 			if (VERBOSITY_LEVEL > 1) {
 				options.logging_type = ceres::LoggingType::PER_MINIMIZER_ITERATION;
+				//输出到cout
 				options.minimizer_progress_to_stdout = true;
 			} else {
 				options.logging_type = ceres::LoggingType::SILENT;
@@ -1483,9 +1490,9 @@ bool Scene::RefineMesh(unsigned nResolutionLevel, unsigned nMinResolution, unsig
 			options.gradient_tolerance = 1e-7;
 			options.max_num_line_search_step_size_iterations = 10;
 			options.callbacks.push_back(problemData);
-			ceres::GradientProblemSolver::Summary summary;
+			ceres::GradientProblemSolver::Summary summary; // 优化信息
 			// SolveProblem
-			// 求解
+			// 开始求解
 			ceres::Solve(options, problem, problemData->GetParameters(), &summary);
 			DEBUG_ULTIMATE(summary.FullReport().c_str());
 			switch (summary.termination_type) {
@@ -1567,6 +1574,7 @@ bool Scene::RefineMesh(unsigned nResolutionLevel, unsigned nMinResolution, unsig
 						const Point3d grad(gradients.row(v));
 						// 梯度下降，调整量=梯度*乘个步长
 						vert -= Cast<Vertex::Type>(grad*gstep);
+						// 梯度的幅值
 						gv += norm(grad);
 					}
 				}

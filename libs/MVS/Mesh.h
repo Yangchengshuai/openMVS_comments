@@ -242,27 +242,34 @@ struct TRasterMesh {
 	}
 	void Project(const Mesh::Face& facet) {
 		// project face vertices to image plane
+		// 投影face的顶点到图像平面上
 		for (int v=0; v<3; ++v) {
 			// skip face if not completely inside
+			// 如果face没有完全包含在图像内则跳过
 			if (!static_cast<DERIVED*>(this)->ProjectVertex(vertices[facet[v]], v))
 				return;
 		}
 		// compute the face center, which is also the view to face vector
 		// (cause the face is in camera view space)
+		// 计算face的中心
 		const Point3 faceCenter((ptc[0]+ptc[1]+ptc[2])/3);
 		// skip face if the (cos) angle between
 		// the view to face vector and the view direction is negative
+		// 如果z小于0说明该face对相机不可见则跳过
 		if (faceCenter.z <= REAL(0))
 			return;
 		// compute the plane defined by the 3 points
+		// 计算三个顶点确定的平面
 		const Point3 edge1(ptc[1]-ptc[0]);
 		const Point3 edge2(ptc[2]-ptc[0]);
 		normalPlane = edge1.cross(edge2);
 		// check the face is facing the camera and
 		// prepare vector used to compute the depth during rendering
+		// 确认face是否是朝向相机的
 		if (!static_cast<DERIVED*>(this)->CheckNormal(faceCenter))
 			return;
 		// draw triangle and for each pixel compute depth as the ray intersection with the plane
+		// 将三角面内的像素栅格化插值
 		Image8U3::RasterizeTriangle(pti[0], pti[1], pti[2], *this);
 	}
 

@@ -2028,8 +2028,10 @@ void Scene::DenseReconstructionEstimate(void* pData)
 			#endif
 			// save compute depth-map for this image
 			// 保存计算的深度图
-			if (!depthData.depthMap.empty())
+			if (!depthData.depthMap.empty()){
 				depthData.Save(ComposeDepthFilePath(depthData.GetView().GetID(), "dmap"));
+                                ExportDepthMap_additional(ComposeDepthFilePath(depthData.GetView().GetID(), "png"), depthData.depthMap);
+			}
 			depthData.ReleaseImages();
 			depthData.Release();
 			data.progress->operator++();

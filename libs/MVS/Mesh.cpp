@@ -117,6 +117,7 @@ Mesh::Box Mesh::GetAABB(const Box& bound) const
 
 
 // extract array of vertices incident to each vertex
+// 提取每个顶点相邻的顶点（one-ring）
 void Mesh::ListIncidenteVertices()
 {
 	vertexVertices.Empty();

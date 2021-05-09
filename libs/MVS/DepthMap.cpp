@@ -1650,6 +1650,21 @@ bool MVS::ExportDepthMap(const String& fileName, const DepthMap& depthMap, Depth
 		return false;
 	return DepthMap2Image(depthMap, minDepth, maxDepth).Save(fileName);
 } // ExportDepthMap
+bool MVS::ExportDepthMap_additional(const String& fileName, const DepthMap& depthMap)
+{
+    if (depthMap.empty())
+        return false;
+    // create depth image
+    cv::Mat depth_image = cv::Mat::zeros(depthMap.rows,depthMap.cols,CV_16UC1);
+    int n = 0;
+    for(int i=0;i<depth_image.rows;i++)
+        for(int j=0;j<depth_image.cols;j++) {
+            depth_image.at<ushort>(cv::Point(j, i)) = depthMap[n++] * 1000.0;
+        }
+    cv::imwrite(fileName,depth_image);
+//    cv::imshow(fileName,depth_image);
+//    cv::waitKey(0);
+} // ExportDepthMap
 /*----------------------------------------------------------------*/
 
 // export normal map as an image
