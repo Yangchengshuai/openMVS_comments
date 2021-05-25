@@ -13,13 +13,17 @@ OpenMVS 注释版
 
 附：
 
-课程目录：
+**课程目录**：
 
 <img src="https://github.com/ReeseL/pictures_lib/raw/main/03.png" alt="c1_22" style="zoom:200%;" />
 
-课程入口：
+**课程入口**：
 
-![in](https://github.com/ReeseL/pictures_lib/raw/main/01.jpg)
+链接：https://appafc4omci9700.h5.xiaoeknow.com
+
+扫码加入：
+
+![in](https://github.com/ReeseL/pictures_lib/raw/main/04.jpg)
 
 ---
 

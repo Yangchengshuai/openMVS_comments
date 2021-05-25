@@ -701,6 +701,7 @@ double MeshRefine::ScoreMesh(double* gradients)
 	}
 	// loop through all vertices and compute the smoothing gradient
 	// Step 3 循环所有顶点计算平滑梯度,计算的是图像梯度的梯度*权重 grad2=nrm*(1/N*Σgradvi-gradv)
+	// nrm=1/(1+1/Nisum(1/Nj))
 	smoothGrad2.Resize(vertices.GetSize());
 	{
 	ASSERT(events.IsEmpty());
@@ -826,7 +827,7 @@ void MeshRefine::ProjectMesh(
 // project image from view B to view A through the mesh;
 // the projected image is stored in imageA
 // (imageAB is assumed to be initialize to the right size)
-// 将Bwarp到A上，存储在imageA
+// 通过mesh(depthA)将B 图像投影到A上，存储在imageA
 void MeshRefine::ImageMeshWarp(
 	const DepthMap& depthMapA, const Camera& cameraA,
 	const DepthMap& depthMapB, const Camera& cameraB,
@@ -1027,7 +1028,7 @@ void MeshRefine::ComputePhotometricGradient(
 			const Point3 X(rayA*REAL(depthA)+cameraA.C);
 			// project point in second image and
 			// projection Jacobian matrix in the second image of the 3D point on the surface
-			// !!! 待补充 将点投影到第二个图像上 ，雅可比矩阵计算 todo 
+			// !!! 将点投影到第二个图像上 ，雅可比矩阵计算 todo 
 			const float depthB(ProjectVertex(cameraB.P.val, X.ptr(), xB.ptr(), xJac.val));
 			ASSERT(depthB > 0);
 			// compute gradient in image B
@@ -1273,6 +1274,7 @@ void MeshRefine::ThProcessPair(uint32_t idxImageA, uint32_t idxImageB)
 	ComputeLocalVariance(imageAB, mask, imageMeanAB, imageVarAB);
 	DEC_Image(Real, imageZNCC);
 	DEC_Image(Real, imageDZNCC);
+	// 计算NCC
 	const float score(ComputeLocalZNCC(imageA, *imageMeanA, *imageVarA, imageAB, imageMeanAB, imageVarAB, mask, imageZNCC, imageDZNCC));
 	#ifdef MESHOPT_TYPEPOOL
 	DST_Image(imageZNCC);

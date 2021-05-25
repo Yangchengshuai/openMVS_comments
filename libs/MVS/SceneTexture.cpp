@@ -200,11 +200,12 @@ struct MeshTexture {
 	typedef cList<TexturePatch,const TexturePatch&,1,1024,FIndex> TexturePatchArr;
 
 	// used to optimize texture patches
+	// 用来优化纹理patch 
 	struct SeamVertex {
 		struct Patch {
 			struct Edge {
-				uint32_t idxSeamVertex; // the other vertex of this edge
-				FIndex idxFace; // the face containing this edge in this patch
+				uint32_t idxSeamVertex; // 这个边的另一个顶点 the other vertex of this edge
+				FIndex idxFace; // 在这个patch中包含该边的face id the face containing this edge in this patch
 
 				inline Edge() {}
 				inline Edge(uint32_t _idxSeamVertex) : idxSeamVertex(_idxSeamVertex) {}
@@ -214,9 +215,9 @@ struct MeshTexture {
 			};
 			typedef cList<Edge,const Edge&,0,4,uint32_t> Edges;
 
-			uint32_t idxPatch; // the patch containing this vertex
-			Point2f proj; // the projection of this vertex in this patch
-			Edges edges; // the edges starting from this vertex, contained in this patch (exactly two for manifold meshes)
+			uint32_t idxPatch; // 包含该顶点的patch的id  the patch containing this vertex
+			Point2f proj; // 该顶点在这个patch的投影坐标the projection of this vertex in this patch
+			Edges edges; // 在这个patch中以这个点为起始的边，the edges starting from this vertex, contained in this patch (exactly two for manifold meshes)
 
 			inline Patch() {}
 			inline Patch(uint32_t _idxPatch) : idxPatch(_idxPatch) {}
@@ -226,20 +227,22 @@ struct MeshTexture {
 		};
 		typedef cList<Patch,const Patch&,1,4,uint32_t> Patches;
 
-		VIndex idxVertex; // the index of this vertex
-		Patches patches; // the patches meeting at this vertex (two or more)
+		VIndex idxVertex; // 顶点的索引 the index of this vertex
+		Patches patches; // 包含该顶点的所有patchthe patches meeting at this vertex (two or more)
 
 		inline SeamVertex() {}
 		inline SeamVertex(uint32_t _idxVertex) : idxVertex(_idxVertex) {}
 		inline bool operator == (uint32_t _idxVertex) const {
 			return (idxVertex == _idxVertex);
 		}
+		// 取patch
 		Patch& GetPatch(uint32_t idxPatch) {
 			const uint32_t idx(patches.Find(idxPatch));
 			if (idx == NO_ID)
 				return patches.AddConstruct(idxPatch);
 			return patches[idx];
 		}
+		// 根据patch id 进行排序
 		inline void SortByPatchIndex(IndexArr& indices) const {
 			indices.Resize(patches.GetSize());
 			std::iota(indices.Begin(), indices.End(), 0);
@@ -252,16 +255,16 @@ struct MeshTexture {
 
 	// used to iterate vertex labels
 	struct PatchIndex {
-		bool bIndex;
+		bool bIndex; // 记录顶点是否在边界
 		union {
-			uint32_t idxPatch;
-			uint32_t idxSeamVertex;
+			uint32_t idxPatch; // 顶点所在patch id
+			uint32_t idxSeamVertex; // 顶点若在边界上则对应seamvertex这个list的id是多少
 		};
 	};
 	typedef CLISTDEF0(PatchIndex) PatchIndices;
 	struct VertexPatchIterator {
-		uint32_t idx;
-		uint32_t idxPatch;
+		uint32_t idx; // 记录的是当前处理的第几个patch
+		uint32_t idxPatch; // 当前的patch id
 		const SeamVertex::Patches* pPatches;
 		inline VertexPatchIterator(const PatchIndex& patchIndex, const SeamVertices& seamVertices) : idx(NO_ID) {
 			if (patchIndex.bIndex) {
@@ -440,7 +443,7 @@ public:
 	Mesh::VertexFacesArr& vertexFaces; // 每个顶点包含的所有faces。for each vertex, the list of faces containing it
 	BoolArr& vertexBoundary; // 记录每个顶点是否是边界点。for each vertex, stores if it is at the boundary or not
 	Mesh::TexCoordArr& faceTexcoords; // 存储每个face的三个顶点的纹理坐标。for each face, the texture-coordinates of the vertices
-	Image8U3& textureDiffuse; //纹理 texture containing the diffuse color
+	Image8U3& textureDiffuse; //纹理图 texture containing the diffuse color
 
 	// constant the entire time
 	Mesh::VertexArr& vertices;
