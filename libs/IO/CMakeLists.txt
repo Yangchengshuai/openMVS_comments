@@ -24,8 +24,12 @@ else()
 	SET(TIFF_LIBRARIES "")
 endif()
 
+
+include_directories(../)
+
 # List sources files
 FILE(GLOB PCH_C "Common.cpp")
+
 
 FILE(GLOB LIBRARY_FILES_C "*.cpp")
 FILE(GLOB LIBRARY_FILES_H "*.h" "*.inl")
@@ -43,7 +47,7 @@ cxx_library_with_type_no_pch(IO "Libs" "STATIC" "${cxx_default}"
 set_target_pch(IO Common.h)
 
 # Link its dependencies
-TARGET_LINK_LIBRARIES(IO Common ${PNG_LIBRARIES} ${JPEG_LIBRARIES} ${TIFF_LIBRARIES} ${EXIV2_LIBS})
+TARGET_LINK_LIBRARIES(IO MVS Common ${PNG_LIBRARIES} ${JPEG_LIBRARIES} ${TIFF_LIBRARIES} ${EXIV2_LIBS})
 
 # Install
 SET_TARGET_PROPERTIES(IO PROPERTIES
