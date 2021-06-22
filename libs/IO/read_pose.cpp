@@ -1,4 +1,5 @@
 #include "read_pose.h"
+#include <OpenMVS/MVS/Common.h>
 using namespace MVS;
 struct POINT3F
 {
@@ -83,11 +84,11 @@ bool read_mvs_pose(string file,MVSPOSE &mvs_pose)
 	isbufLine >> s>>width>>height;
 	mvs_pose.height=height;
 	mvs_pose.width=width;
-    std::cout << "width " << width<< std::endl;
+//    std::cout << "width " << width<< std::endl;
 	fin.getline(bufLine, sizeof(bufLine));
     istringstream isbuf_size(bufLine);
     isbuf_size >> num_images;
-    std::cout << "num_images " << num_images<< std::endl;
+//    std::cout << "num_images " << num_images<< std::endl;
 	//numimage = std::stoi(tmp);
     vector<POINT3F> points;
 	for (int i = 0; i < num_images; i++)
@@ -126,8 +127,8 @@ bool read_mvs_pose(string file,MVSPOSE &mvs_pose)
 		mvs_pose.poses.push_back(pose);
 	}
 	RGB color(0,255,0);
-    save_pointcloud_obj("/home/wangwen/Desktop/三维重建/MVS/data/track_platform.obj", points,mvs_pose.poses.size(),color);
-
+//    save_pointcloud_obj("/home/wangwen/Desktop/三维重建/MVS/data/track_platform.obj", points,mvs_pose.poses.size(),color);
+    save_pointcloud_obj(string(WORKING_FOLDER) + "/track_platform.obj", points,mvs_pose.poses.size(),color);
 	// 读稀疏点
 	fin.getline(bufLine, sizeof(bufLine));
     istringstream isbuf_npoint(bufLine);
@@ -135,7 +136,7 @@ bool read_mvs_pose(string file,MVSPOSE &mvs_pose)
     isbuf_npoint >> num_pts;
 	mvs_pose.spare_points.resize(num_pts);
 	mvs_pose.views.resize(num_pts);
-    std::cout << "num_pts" <<num_pts << std::endl;
+//    std::cout << "num_pts" <<num_pts << std::endl;
 	for (int i = 0; i < num_pts; i++)
 	{
 		fin.getline(bufLine, sizeof(bufLine));
@@ -165,30 +166,30 @@ bool read_mvs_pose(string file,MVSPOSE &mvs_pose)
         points.push_back(Q);
 		
 	}
-
-    save_pointcloud_obj("/home/wangwen/Desktop/三维重建/MVS/data/track.obj", points,mvs_pose.poses.size(),color);
+    save_pointcloud_obj(string(WORKING_FOLDER) + "/track.obj", points,mvs_pose.poses.size(),color);
 	return true;
 }
 bool load_scene(string file,Scene &scene)
 {
+    std::cout << "We are using Keyframe from SLAM to achieve 3D reconstruction" << std::endl;
     MVSPOSE mvs_pose;
 	if(!read_mvs_pose(file,mvs_pose))
 	{
 		return false;
 	}
-    std::cout << " load mvs ok "  << std::endl;
+    std::cout << "load mvs ok "  << std::endl;
     int numViews =mvs_pose.poses.size();
 	scene.platforms.Reserve(numViews);
 	scene.images.Reserve(numViews);
 	scene.nCalibratedImages = 0;
-    cout << "numViews" << mvs_pose.poses.size() << endl;
+    cout << "numViews " << mvs_pose.poses.size() << endl;
     vector<POINT3F> points;
 	for (int count = 0; count < numViews; count++)
 	{
 		int idx = count; //true idx
 		MVS::Image& image = scene.images.AddEmpty();
 
-        string name="/home/wangwen/Desktop/三维重建/MVS/rgb/"+mvs_pose.images_name[idx]+".png";
+        string name=string(WORKING_FOLDER)+"images/"+mvs_pose.images_name[idx]+".png";
         image.name=name;
         image.platformID = scene.platforms.GetSize();
         image.cameraID = 0;
@@ -199,11 +200,11 @@ bool load_scene(string file,Scene &scene)
 
 		MVS::Platform& platform = scene.platforms.AddEmpty();
 		MVS::Platform::Camera& camera = platform.cameras.AddEmpty();
-        cout << "wangwen "  <<mvs_pose.poses[idx].K[2] << "   "<< mvs_pose.poses[idx].K[5] << endl;
+
 		camera.K = MVS::Platform::Camera::ComposeK<REAL, REAL>(mvs_pose.poses[idx].K[0], mvs_pose.poses[idx].K[4] , 2.0*mvs_pose.poses[idx].K[2] , 2.0*mvs_pose.poses[idx].K[5]);
 		camera.R = RMatrix::IDENTITY;
 		camera.C = CMatrix::ZERO;
-        cout << "camera.K" << camera.K << endl;
+//        cout << "camera.K" << camera.K << endl;
 		// normalize camera intrinsics
 		const REAL fScale(REAL(1) / MVS::Camera::GetNormalizationScale(image.width, image.height));
 		camera.K(0, 0) *= fScale;
@@ -224,8 +225,8 @@ bool load_scene(string file,Scene &scene)
 			pose.C.ptr()[j] = -float(double(mvs_pose.poses[idx].rot[j])*double(mvs_pose.poses[idx].trans[0]) + double(mvs_pose.poses[idx].rot[3 + j])*double(mvs_pose.poses[idx].trans[1]) + double(mvs_pose.poses[idx].rot[6 + j])*double(mvs_pose.poses[idx].trans[2]));
 		}
 
-		cout <<"image.poseID " << image.poseID <<"image.platformID"<<image.platformID<<endl;
-		cout << "camera.R\n"<<camera.R << "camera.C" << camera.C << endl;
+//		cout <<"image.poseID " << image.poseID <<"image.platformID"<<image.platformID<<endl;
+//		cout << "camera.R\n"<<camera.R << "camera.C" << camera.C << endl;
 
         POINT3F point_tmp(pose.C.x,pose.C.y,pose.C.z);
 		points.push_back(point_tmp);
@@ -251,8 +252,8 @@ bool load_scene(string file,Scene &scene)
 			views.InsertSort(mvs_pose.views[idx][viewId]);
 		}
 	}
-    RGB color(255,0,0);
-    save_pointcloud_obj("/home/wangwen/Desktop/三维重建/MVS/data/track_1.obj", points,mvs_pose.poses.size(),color);
+//    RGB color(255,0,0);
+//    save_pointcloud_obj(file + "/track_1.obj", points,mvs_pose.poses.size(),color);
 	return true;
 }
 //从关联文件中提取这些需要加载的图像的路径和时间戳
