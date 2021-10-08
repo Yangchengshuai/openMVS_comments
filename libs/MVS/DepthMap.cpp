@@ -1661,7 +1661,7 @@ bool MVS::ExportDepthMap_additional(const String& fileName, const DepthMap& dept
         for(int j=0;j<depth_image.cols;j++) {
             depth_image.at<ushort>(cv::Point(j, i)) = depthMap[n++] * 1000.0;
         }
-    cv::imwrite(fileName,depth_image);
+ //   cv::imwrite(fileName,depth_image);
 //    cv::imshow(fileName,depth_image);
 //    cv::waitKey(0);
 } // ExportDepthMap
